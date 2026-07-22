@@ -1,0 +1,367 @@
+"""
+Agent memory tools.
+
+This module provides agent memory operations through an abstract AgentMemory interface,
+allowing for different implementations (local vector DB, remote cloud service, etc.).
+The tools access AgentMemory via ToolContext, which is populated by the Agent.
+"""
+
+import logging
+from typing import Any, Dict, List, Optional, Type
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+from easyq2sql.core.tool import Tool, ToolContext, ToolResult
+from easyq2sql.core.agent.config import UiFeature
+from easyq2sql.capabilities.agent_memory import AgentMemory
+from easyq2sql.components import (
+    UiComponent,
+    StatusBarUpdateComponent,
+    CardComponent,
+)
+
+
+class SaveQuestionToolArgsParams(BaseModel):
+    """Parameters for saving question-tool-argument combinations."""
+
+    question: str = Field(description="The original question that was asked")
+    tool_name: str = Field(
+        description="The name of the tool that was used successfully"
+    )
+    args: Dict[str, Any] = Field(
+        description="The arguments that were passed to the tool"
+    )
+    trajectory: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description=(
+            "The sequence of tool calls made in this round, from first to last. "
+            "Each step should include 'tool' (tool name) and 'args_summary' "
+            "(brief description of arguments). For run_sql steps, also include "
+            "the 'sql' key with the actual SQL executed. "
+            "Example: [{'tool': 'search_table_schema', 'args_summary': 'risk_alert'}, "
+            "{'tool': 'run_sql', 'args_summary': 'count by risk_level', "
+            "'sql': 'SELECT risk_level, COUNT(*) FROM risk_alert GROUP BY risk_level'}]"
+        ),
+    )
+    final_sql: Optional[str] = Field(
+        default=None,
+        description=(
+            "The final SQL query (or queries) that produced the answer to the "
+            "user's question. Use markdown code blocks for multiple queries."
+        ),
+    )
+
+
+class SearchSavedCorrectToolUsesParams(BaseModel):
+    """Parameters for searching saved tool usage patterns."""
+
+    question: str = Field(
+        description="The question to find similar tool usage patterns for"
+    )
+    limit: Optional[int] = Field(
+        default=2, description="Maximum number of results to return"
+    )
+    tool_name_filter: Optional[str] = Field(
+        default=None, description="Filter results to specific tool name"
+    )
+
+
+class SaveTextMemoryParams(BaseModel):
+    """Parameters for saving free-form text memories."""
+
+    content: str = Field(
+        description=(
+            "The text content to save as a memory. "
+            "Use this for: user feedback on incorrect results, error corrections "
+            "(e.g. 'user said the risk_level values are 低风险/中风险/高风险, not low/medium/high'), "
+            "clarifications about data meaning, preferred query patterns, or "
+            "any domain knowledge the user explicitly teaches you. "
+            "Write in a self-contained way so future searches can find it."
+        )
+    )
+
+
+class SaveQuestionToolArgsTool(Tool[SaveQuestionToolArgsParams]):
+    """Tool for saving successful question-tool-argument combinations."""
+
+    @property
+    def name(self) -> str:
+        return "save_question_tool_args"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Save a successful question-tool-argument combination for future reference"
+        )
+
+    def get_args_schema(self) -> Type[SaveQuestionToolArgsParams]:
+        return SaveQuestionToolArgsParams
+
+    async def execute(
+        self, context: ToolContext, args: SaveQuestionToolArgsParams
+    ) -> ToolResult:
+        """Save the tool usage pattern to agent memory."""
+        try:
+            await context.agent_memory.save_tool_usage(
+                question=args.question,
+                tool_name=args.tool_name,
+                args=args.args,
+                context=context,
+                success=True,
+                trajectory=args.trajectory,
+                final_sql=args.final_sql,
+            )
+
+            success_msg = (
+                f"Successfully saved usage pattern for '{args.tool_name}' tool"
+            )
+            return ToolResult(
+                success=True,
+                result_for_llm=success_msg,
+                ui_component=UiComponent(
+                    rich_component=StatusBarUpdateComponent(
+                        status="success",
+                        message="Saved to memory",
+                        detail=f"Saved pattern for '{args.tool_name}'",
+                    ),
+                    simple_component=None,
+                ),
+            )
+
+        except Exception as e:
+            error_message = f"Failed to save memory: {str(e)}"
+            return ToolResult(
+                success=False,
+                result_for_llm=error_message,
+                ui_component=UiComponent(
+                    rich_component=StatusBarUpdateComponent(
+                        status="error", message="Failed to save memory", detail=str(e)
+                    ),
+                    simple_component=None,
+                ),
+                error=str(e),
+            )
+
+
+class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
+    """Tool for searching saved tool usage patterns.
+
+    Uses hybrid search (vector + keyword with RRF fusion) on the agent
+    memory store. Returns up to ``limit`` results (default 2).
+    """
+
+    def __init__(self):
+        pass
+
+    @property
+    def name(self) -> str:
+        return "search_saved_correct_tool_uses"
+
+    @property
+    def description(self) -> str:
+        return "Search for similar tool usage patterns based on a question"
+
+    def get_args_schema(self) -> Type[SearchSavedCorrectToolUsesParams]:
+        return SearchSavedCorrectToolUsesParams
+
+    async def execute(
+        self, context: ToolContext, args: SearchSavedCorrectToolUsesParams
+    ) -> ToolResult:
+        """Search for similar tool usage patterns with hybrid retrieval + RRF re-rank."""
+        try:
+            results = await context.agent_memory.search_similar_usage(
+                question=args.question,
+                context=context,
+                limit=args.limit or 2,
+                tool_name_filter=args.tool_name_filter,
+            )
+
+            if not results:
+                no_results_msg = (
+                    "No similar tool usage patterns found for this question."
+                )
+                ui_features_available = context.metadata.get(
+                    "ui_features_available", []
+                )
+                show_detailed_results = (
+                    UiFeature.UI_FEATURE_SHOW_MEMORY_DETAILED_RESULTS
+                    in ui_features_available
+                )
+                if show_detailed_results:
+                    ui_component = UiComponent(
+                        rich_component=CardComponent(
+                            title="🧠 Memory Search: 0 Results",
+                            content="No similar tool usage patterns found for this question.\n\nSearched agent memory with no matches.",
+                            icon="🔍",
+                            status="info",
+                            collapsible=True,
+                            collapsed=True,
+                            markdown=True,
+                        ),
+                        simple_component=None,
+                    )
+                else:
+                    ui_component = UiComponent(
+                        rich_component=StatusBarUpdateComponent(
+                            status="idle",
+                            message="No similar patterns found",
+                            detail="Searched agent memory",
+                        ),
+                        simple_component=None,
+                    )
+                return ToolResult(
+                    success=True,
+                    result_for_llm=no_results_msg,
+                    ui_component=ui_component,
+                )
+
+            # Hybrid search results already re-ranked & truncated by the store
+
+            # Format results for LLM
+            results_text = f"Found {len(results)} similar tool usage pattern(s):\n\n"
+            for i, result in enumerate(results, 1):
+                memory = result.memory
+                results_text += f"{i}. {memory.tool_name} (similarity: {result.similarity_score:.6f})\n"
+                results_text += f"   Question: {memory.question}\n"
+                results_text += f"   Args: {memory.args}\n"
+                # Include execution trajectory if available
+                if memory.trajectory:
+                    results_text += "   Execution trajectory:\n"
+                    for step in memory.trajectory:
+                        tool = step.get("tool", "?")
+                        summary = step.get("args_summary", "")
+                        sql = step.get("sql", "")
+                        results_text += f"     → {tool}({summary})"
+                        if sql:
+                            results_text += f" [SQL: {sql}]"
+                        results_text += "\n"
+                # Include final SQL if available
+                if memory.final_sql:
+                    results_text += f"   Final SQL: {memory.final_sql}\n"
+                results_text += "\n"
+
+            logger.info(f"Agent memory search results: {results_text.strip()}")
+
+            # UI component based on access level
+            ui_features_available = context.metadata.get("ui_features_available", [])
+            show_detailed_results = (
+                UiFeature.UI_FEATURE_SHOW_MEMORY_DETAILED_RESULTS
+                in ui_features_available
+            )
+            if show_detailed_results:
+                detailed_content = "**Retrieved memories passed to LLM:**\n\n"
+                for i, result in enumerate(results, 1):
+                    memory = result.memory
+                    detailed_content += f"**{i}. {memory.tool_name}** (similarity: {result.similarity_score:.6f})\n"
+                    detailed_content += f"- **Question:** {memory.question}\n"
+                    detailed_content += f"- **Arguments:** `{memory.args}`\n"
+                    if memory.timestamp:
+                        detailed_content += f"- **Timestamp:** {memory.timestamp}\n"
+                    if memory.memory_id:
+                        detailed_content += f"- **ID:** `{memory.memory_id}`\n"
+                    detailed_content += "\n"
+                ui_component = UiComponent(
+                    rich_component=CardComponent(
+                        title=f"🧠 Memory Search: {len(results)} Result(s)",
+                        content=detailed_content.strip(),
+                        icon="🔍",
+                        status="info",
+                        collapsible=True,
+                        collapsed=True,
+                        markdown=True,
+                    ),
+                    simple_component=None,
+                )
+            else:
+                ui_component = UiComponent(
+                    rich_component=StatusBarUpdateComponent(
+                        status="success",
+                        message=f"Found {len(results)} similar pattern(s)",
+                        detail="Retrieved from agent memory",
+                    ),
+                    simple_component=None,
+                )
+
+            return ToolResult(
+                success=True,
+                result_for_llm=results_text.strip(),
+                ui_component=ui_component,
+            )
+
+        except Exception as e:
+            error_message = f"Failed to search memories: {str(e)}"
+            return ToolResult(
+                success=False,
+                result_for_llm=error_message,
+                ui_component=UiComponent(
+                    rich_component=StatusBarUpdateComponent(
+                        status="error", message="Failed to search memory", detail=str(e)
+                    ),
+                    simple_component=None,
+                ),
+                error=str(e),
+            )
+
+
+class SaveTextMemoryTool(Tool[SaveTextMemoryParams]):
+    """Tool for saving free-form text memories."""
+
+    @property
+    def name(self) -> str:
+        return "save_text_memory"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Save free-form text memory for important knowledge that should be "
+            "remembered across conversations. Use this to record: "
+            "user feedback about incorrect results, error corrections, "
+            "clarifications about data or schema, domain terminology, "
+            "query best practices, or user preferences. "
+            "Each memory should be self-contained and searchable."
+        )
+
+    def get_args_schema(self) -> Type[SaveTextMemoryParams]:
+        return SaveTextMemoryParams
+
+    async def execute(
+        self, context: ToolContext, args: SaveTextMemoryParams
+    ) -> ToolResult:
+        """Save a text memory to agent memory."""
+        try:
+            text_memory = await context.agent_memory.save_text_memory(
+                content=args.content, context=context
+            )
+
+            success_msg = (
+                f"Successfully saved text memory with ID: {text_memory.memory_id}"
+            )
+            return ToolResult(
+                success=True,
+                result_for_llm=success_msg,
+                ui_component=UiComponent(
+                    rich_component=StatusBarUpdateComponent(
+                        status="success",
+                        message="Saved text memory",
+                        detail=f"ID: {text_memory.memory_id}",
+                    ),
+                    simple_component=None,
+                ),
+            )
+
+        except Exception as e:
+            error_message = f"Failed to save text memory: {str(e)}"
+            return ToolResult(
+                success=False,
+                result_for_llm=error_message,
+                ui_component=UiComponent(
+                    rich_component=StatusBarUpdateComponent(
+                        status="error",
+                        message="Failed to save text memory",
+                        detail=str(e),
+                    ),
+                    simple_component=None,
+                ),
+                error=str(e),
+            )
