@@ -18,7 +18,6 @@ from .python import (
 from easyq2sql.integrations.plotly import PlotlyChartGenerator
 from .run_sql import RunSqlTool
 from .visualize_data import VisualizeDataTool
-from .get_sql_for_file import GetSqlForFileTool
 
 __all__ = [
     # File system
@@ -36,7 +35,6 @@ __all__ = [
     "create_python_tools",
     # SQL
     "RunSqlTool",
-    "GetSqlForFileTool",
     # Visualization
     "PlotlyChartGenerator",
     "VisualizeDataTool",

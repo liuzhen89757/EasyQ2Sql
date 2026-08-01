@@ -87,18 +87,12 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                     columns = df.columns.tolist()
                     row_count = len(df)
 
-                    # Write FULL DataFrame to CSV file for frontend export,
-                    # and a companion .sql file so the SQL can be retrieved
-                    # later by filename reference.
+                    # Write FULL DataFrame to CSV file for frontend export.
                     file_id = str(uuid.uuid4())[:8]
                     filename = f"query_results_{file_id}.csv"
-                    sql_filename = f"query_results_{file_id}.sql"
                     csv_content = df.to_csv(index=False)
                     await self.file_system.write_file(
                         filename, csv_content, context, overwrite=True
-                    )
-                    await self.file_system.write_file(
-                        sql_filename, args.sql, context, overwrite=True
                     )
 
                     # Build result_for_llm: at most 20 rows so we stay within
@@ -116,13 +110,10 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                     else:
                         results_preview = csv_content
 
-                    # Include the SQL prominently so the LLM can reference
-                    # it in the final summary.
                     result = (
                         f"\n{results_preview}\n\n"
                         f"Results saved to file: {filename}\n"
-                        f"SQL saved to file: {sql_filename}\n\n"
-                        f"**IMPORTANT: FOR VISUALIZE_DATA USE FILENAME: {filename}; TO RETRIEVE THE EXACT SQL LATER USE FILENAME: {sql_filename}**\n"
+                        f"**IMPORTANT: FOR VISUALIZE_DATA USE FILENAME: {filename}**\n"
                     )
 
                     # Create DataFrame component for UI
@@ -143,7 +134,6 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "query_type": query_type,
                         "results": results_data,
                         "output_file": filename,
-                        "sql_file": sql_filename,
                     }
             else:
                 # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)

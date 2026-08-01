@@ -16,10 +16,21 @@ from typing import List, Optional
 from easyq2sql.capabilities.metric_store import (
     JoinClause,
     Metric,
-    MetricDimension,
     MetricSearchResult,
     MetricStore,
 )
+
+# Local MetricDimension for backward-compatible ChromaDB storage.
+# The new architecture uses capabilites.dimension_store.Dimension instead,
+# but ChromaDB's metric store keeps dimensions inline for simplicity.
+from pydantic import BaseModel, Field
+
+
+class MetricDimension(BaseModel):
+    """Local dimension model for ChromaDB metric storage (backward compat)."""
+    name: str = Field(description="Dimension label")
+    field_ref: str = Field(description="table.column reference")
+    joins: list[JoinClause] = Field(default_factory=list)
 from easyq2sql.core.search import CrossEncoderReranker
 from easyq2sql.core.tool import ToolContext
 

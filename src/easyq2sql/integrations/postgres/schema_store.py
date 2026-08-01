@@ -285,7 +285,8 @@ class PostgresSchemaStore(SchemaStore):
                 ref_col = col.fk_reference_column or "id"
                 extras.append(f"Maps to {col.fk_reference_table}({ref_col})")
             if col.examples:
-                extras.append(f"Examples: [{', '.join(col.examples)}]")
+                truncated = [e[:100] + "..." if len(e) > 100 else e for e in col.examples]
+                extras.append(f"Examples: [{', '.join(truncated)}]")
 
             if extras:
                 lines.append(", ".join(extras))
@@ -497,24 +498,27 @@ class PostgresSchemaStore(SchemaStore):
                         docs = [
                             row.get("search_text", "") for row in all_rows
                         ]
-                        ce_indices = self._cross_encoder.rerank(
+                        ce_scored = self._cross_encoder.rerank_with_scores(
                             query=query, documents=docs, top_n=limit
                         )
+                        for orig_idx, ce_score in ce_scored:
+                            if orig_idx < len(all_rows):
+                                all_rows[orig_idx]["_ce_score"] = ce_score
                         all_rows = [
-                            all_rows[i]
-                            for i in ce_indices
-                            if i < len(all_rows)
+                            all_rows[idx]
+                            for idx, _ in ce_scored
+                            if idx < len(all_rows)
                         ][:limit]
 
                     results = []
                     for row_dict in all_rows:
-                        rrf_score = row_dict.pop("rrf_score", 0.0)
-                        if rrf_score >= 0.002:
+                        score = row_dict.pop("_ce_score", row_dict.pop("rrf_score", 0.0))
+                        if score >= 0.002:
                             document_text = row_dict.pop("search_text", None)
                             results.append(
                                 SchemaSearchResult(
                                     table=self._row_to_table(row_dict),
-                                    similarity_score=round(rrf_score, 6),
+                                    similarity_score=round(score, 6),
                                     document_text=document_text,
                                 )
                             )

@@ -9,7 +9,6 @@ from .file_system import CommandResult, FileSearchMatch, FileSystem
 from .metric_store import (
     JoinClause,
     Metric,
-    MetricDimension,
     MetricSearchResult,
     MetricStore,
 )
@@ -28,7 +27,6 @@ __all__ = [
     "SchemaSearchResult",
     "MetricStore",
     "Metric",
-    "MetricDimension",
     "JoinClause",
     "MetricSearchResult",
 ]

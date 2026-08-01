@@ -16,31 +16,29 @@ from pydantic import BaseModel, Field
 from ...capabilities.metric_store import (
     MetricStore,
 )
-from ...capabilities.schema_store import SchemaStore
-from ...core.agent.agent import Agent
 
 
 class CreateMetricRequest(BaseModel):
     """Request body for creating a new metric."""
 
     name: str = Field(description="Metric name (user-defined label)")
-    description: Optional[str] = Field(default=None, description="Optional description")
-    analysis_table: str = Field(description="Main fact table name")
-    analysis_field: str = Field(description="table.column being measured")
-    dimensions: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="List of {name, field_ref, joins} dimension objects. "
-        "Each dimension may include 'joins': [{source_table, source_column, target_table, target_column, join_type}]",
+    business_definition: Optional[str] = Field(
+        default=None, description="Business meaning of this metric"
     )
+    calculation_logic: Optional[str] = Field(
+        default=None, description="Aggregate function, e.g. COUNT, SUM, AVG"
+    )
+    data_source: str = Field(description="Source fact table name")
+    analysis_field: str = Field(description="table.column being measured")
+    description: Optional[str] = Field(default=None, description="Optional notes")
 
 
 class UpdateMetricRequest(CreateMetricRequest):
-    """Request body for updating an existing metric. Same schema as create."""
-
+    """Request body for updating an existing metric."""
     pass
 
 
-def _get_context(agent: Agent):
+def _get_context(agent):
     """Build a minimal ToolContext for REST API operations."""
     from ...core.tool import ToolContext
     from ...core.user.models import User
@@ -66,23 +64,17 @@ def _require_store(metric_store):
 
 def register_metric_routes(
     app: FastAPI,
-    agent: Agent,
+    agent,
     metric_store: Optional[MetricStore],
-    schema_store: Optional[SchemaStore] = None,
+    schema_store=None,
     config: Optional[Dict[str, Any]] = None,
+    terminology_store=None,
+    dimension_store=None,
 ) -> None:
     """Register metric management routes on the FastAPI app.
 
-    Routes are always registered so the admin UI can discover them.
-    If ``metric_store`` is ``None``, CRUD endpoints return 503.
-    The ``/functions`` endpoint always works (static catalog).
-
-    Args:
-        app: FastAPI application instance.
-        agent: Vanna Agent instance.
-        metric_store: MetricStore implementation, or None if not configured.
-        schema_store: Optional SchemaStore for field-type-based suggestions.
-        config: Optional server configuration dict.
+    Creates/updates/deletes metrics and auto-generates terminology entries
+    via ``terminology_store.sync_auto_terms()`` when available.
     """
 
     @app.get("/api/easyq2sql/v1/metrics")
@@ -97,41 +89,30 @@ def register_metric_routes(
     async def create_metric(body: CreateMetricRequest) -> Dict[str, Any]:
         """Create a new metric definition."""
         _require_store(metric_store)
-        from ...capabilities.metric_store.models import (
-            JoinClause,
-            Metric,
-            MetricDimension,
-        )
+        from ...capabilities.metric_store.models import Metric
 
         context = _get_context(agent)
 
-        dimensions = [
-            MetricDimension(
-                name=d["name"],
-                field_ref=d["field_ref"],
-                joins=[
-                    JoinClause(
-                        source_table=j["source_table"],
-                        source_column=j["source_column"],
-                        target_table=j["target_table"],
-                        target_column=j["target_column"],
-                        join_type=j.get("join_type", "LEFT JOIN"),
-                    )
-                    for j in d.get("joins", [])
-                ],
-            )
-            for d in body.dimensions
-        ]
-
         metric = Metric(
             name=body.name,
-            description=body.description,
-            analysis_table=body.analysis_table,
+            business_definition=body.business_definition,
+            calculation_logic=body.calculation_logic,
+            data_source=body.data_source,
             analysis_field=body.analysis_field,
-            dimensions=dimensions,
+            description=body.description,
         )
 
         result = await metric_store.create_metric(metric, context)
+
+        # Auto-generate terminology mapping
+        if terminology_store:
+            try:
+                await terminology_store.sync_auto_terms(
+                    context, metrics=[result], dimensions=[]
+                )
+            except Exception:
+                pass
+
         return result.model_dump(mode="json")
 
     @app.get("/api/easyq2sql/v1/metrics/{metric_id}")
@@ -152,11 +133,7 @@ def register_metric_routes(
     ) -> Dict[str, Any]:
         """Update an existing metric definition."""
         _require_store(metric_store)
-        from ...capabilities.metric_store.models import (
-            JoinClause,
-            Metric,
-            MetricDimension,
-        )
+        from ...capabilities.metric_store.models import Metric
 
         context = _get_context(agent)
 
@@ -166,40 +143,31 @@ def register_metric_routes(
                 status_code=404, detail=f"Metric '{metric_id}' not found"
             )
 
-        dimensions = [
-            MetricDimension(
-                name=d["name"],
-                field_ref=d["field_ref"],
-                joins=[
-                    JoinClause(
-                        source_table=j["source_table"],
-                        source_column=j["source_column"],
-                        target_table=j["target_table"],
-                        target_column=j["target_column"],
-                        join_type=j.get("join_type", "LEFT JOIN"),
-                    )
-                    for j in d.get("joins", [])
-                ],
-            )
-            for d in body.dimensions
-        ]
-
         metric = Metric(
             id=metric_id,
             name=body.name,
-            description=body.description,
-            analysis_table=body.analysis_table,
+            business_definition=body.business_definition,
+            calculation_logic=body.calculation_logic,
+            data_source=body.data_source,
             analysis_field=body.analysis_field,
-            dimensions=dimensions,
+            description=body.description,
             created_by=existing.created_by,
             created_at=existing.created_at,
         )
 
         success = await metric_store.update_metric(metric, context)
         if not success:
-            raise HTTPException(
-                status_code=500, detail="Failed to update metric"
-            )
+            raise HTTPException(status_code=500, detail="Failed to update metric")
+
+        # Auto-generate terminology mapping
+        if terminology_store:
+            try:
+                await terminology_store.sync_auto_terms(
+                    context, metrics=[metric], dimensions=[]
+                )
+            except Exception:
+                pass
+
         updated = await metric_store.get_metric(metric_id, context)
         return updated.model_dump(mode="json") if updated else {}
 

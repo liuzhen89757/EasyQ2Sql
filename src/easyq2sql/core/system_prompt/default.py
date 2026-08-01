@@ -52,17 +52,8 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
         has_search = "search_saved_correct_tool_uses" in tool_names
         has_save = "save_question_tool_args" in tool_names
         has_text_memory = "save_text_memory" in tool_names
-        has_get_sql = "get_sql_for_file" in tool_names
         has_search_metrics = "search_metrics" in tool_names
         has_search_schema = "search_table_schema" in tool_names
-
-        # Build search tools list string for prompt
-        _search_tools = []
-        if has_search_metrics:
-            _search_tools.append("search_metrics")
-        if has_search_schema:
-            _search_tools.append("search_table_schema")
-        tools_str = " and ".join(_search_tools) if _search_tools else ""
 
         # Get today's date
         today_date = datetime.now().strftime("%Y-%m-%d")
@@ -92,27 +83,27 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
             prompt_parts.append("\n1. TOOL USAGE MEMORY (Structured Workflow):")
             prompt_parts.append("-" * 50)
 
-        if has_get_sql:
-            prompt_parts.extend(
-                [
-                    "",
-                    "• FIRST: check the conversation history for previously executed run_sql results. If relevant results exist, use get_sql_for_file to retrieve the SQL. If the retrieved SQL can answer the user's question, use it directly — skip search_saved_correct_tool_uses, search_metrics, and search_table_schema.",
-                ]
-            )
-
         if has_search:
             prompt_parts.extend(
                 [
                     "",
-                    "• If no useful SQL was found in conversation history, call search_saved_correct_tool_uses with the user's question to check for existing successful patterns for similar questions.",
+                    "• FIRST: call search_saved_correct_tool_uses with the user's question to check for existing successful patterns for similar questions. Wait for its result before calling any other tools.",
                 ]
             )
 
-        if has_search_metrics or has_search_schema:
+        if has_search_metrics:
             prompt_parts.extend(
                 [
                     "",
-                    f"• If search_saved_correct_tool_uses returns no useful pattern, use {tools_str} to find relevant metrics and table schemas for the question before executing other tools.",
+                    f"• If search_saved_correct_tool_uses returns no useful pattern, then call search_metrics to find relevant metrics for the question.",
+                ]
+            )
+
+        if has_search_schema:
+            prompt_parts.extend(
+                [
+                    "",
+                    f"• If search_metrics returns no useful metric, then call search_table_schema to find relevant table schemas as a fallback.",
                 ]
             )
 
@@ -138,21 +129,21 @@ class DefaultSystemPromptBuilder(SystemPromptBuilder):
                     "",
                     "Example workflow:",
                     "  • User asks a question",
-                    f'  • First: Check conversation history for relevant run_sql results; if found, use get_sql_for_file to retrieve SQL'
-                    if has_get_sql
-                    else "",
-                    f'  • If no useful SQL in history: Call search_saved_correct_tool_uses(question="user\'s question")'
+                    f'  • First: Call search_saved_correct_tool_uses(question="user\'s question")'
                     if has_search
                     else "",
-                    f'  • If search_saved_correct_tool_uses returns no useful pattern, use {tools_str} to find relevant metrics and table schemas'
-                    if (has_search_metrics or has_search_schema)
+                    f'  • If no useful pattern: Call search_metrics to find relevant metrics'
+                    if has_search_metrics
+                    else "",
+                    f'  • If search_metrics returns no useful metric: Call search_table_schema as fallback'
+                    if has_search_schema
                     else "",
                     "  • Then: Execute the appropriate tool(s) based on search results and the question",
                     f'  • Finally: Only if no matching pattern was found by the earlier search, call save_question_tool_args(question="user\'s question", tool_name="tool_used", args={{the args you used}})'
                     if has_save
                     else "",
                     "",
-                    "Do NOT skip checking conversation history for useful SQL. If no useful SQL in history, do NOT skip the search step."
+                    "Do NOT skip the search step."
                     if has_search
                     else "",
                     "",

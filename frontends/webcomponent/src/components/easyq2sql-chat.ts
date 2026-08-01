@@ -1,7 +1,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { vannaDesignTokens } from '../styles/easyq2sql-design-tokens.js';
-import { VannaApiClient, ChatStreamChunk } from '../services/api-client.js';
+import { VannaApiClient, ChatStreamChunk, ConversationMessage } from '../services/api-client.js';
 import { ComponentManager, RichComponent } from './rich-component-system.js';
 import './easyq2sql-status-bar.js';
 import './easyq2sql-progress-tracker.js';
@@ -30,20 +30,7 @@ export class EasyQ2SqlChat extends LitElement {
         --chat-surface: var(--vanna-background-root);
         --chat-muted: var(--vanna-background-default);
         --chat-muted-stronger: var(--vanna-background-higher);
-        max-width: 1024px;
         margin: 0 auto;
-        background: var(--vanna-background-root);
-        border: 1px solid var(--vanna-outline-dimmer);
-        border-radius: var(--vanna-border-radius-2xl);
-        box-shadow: var(--vanna-shadow-xl);
-        overflow: hidden;
-        transition: box-shadow var(--vanna-duration-300) ease, transform var(--vanna-duration-300) ease;
-        position: relative;
-      }
-
-      :host(:hover) {
-        box-shadow: var(--vanna-shadow-2xl);
-        transform: translateY(-2px);
       }
 
       :host([theme="dark"]) {
@@ -55,27 +42,18 @@ export class EasyQ2SqlChat extends LitElement {
         --chat-surface: var(--vanna-background-higher);
         --chat-muted: var(--vanna-background-default);
         --chat-muted-stronger: var(--vanna-background-highest);
-        background: var(--vanna-background-higher);
-        border-color: var(--vanna-outline-default);
       }
 
       :host(.maximized) {
         position: fixed;
         top: var(--vanna-space-6);
-        left: var(--vanna-space-6);
-        right: var(--vanna-space-6);
+        left: 50%;
+        transform: translateX(-50%);
+        width: calc(100vw - var(--vanna-space-6) * 2);
+        max-width: 1200px;
         bottom: var(--vanna-space-6);
-        max-width: none;
-        width: auto;
         margin: 0;
         z-index: var(--vanna-z-modal);
-        border-radius: var(--vanna-border-radius-xl);
-        transform: none;
-        box-shadow: var(--vanna-shadow-2xl);
-      }
-
-      :host(.maximized):hover {
-        transform: none;
       }
 
       :host(.minimized) {
@@ -128,20 +106,39 @@ export class EasyQ2SqlChat extends LitElement {
       }
 
       .chat-layout {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 300px;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
         height: 600px;
         max-height: 80vh;
-        background: var(--chat-muted);
+        background: var(--vanna-background-root);
+        border: 1px solid var(--vanna-outline-dimmer);
+        border-radius: var(--vanna-border-radius-2xl);
+        box-shadow: var(--vanna-shadow-xl);
+        overflow: hidden;
+        transition: box-shadow var(--vanna-duration-300) ease, transform var(--vanna-duration-300) ease;
+        position: relative;
+      }
+
+      .chat-layout:hover {
+        box-shadow: var(--vanna-shadow-2xl);
+        transform: translateY(-2px);
+      }
+
+      :host([theme="dark"]) .chat-layout {
+        background: var(--vanna-background-higher);
+        border-color: var(--vanna-outline-default);
       }
 
       :host(.maximized) .chat-layout {
         height: calc(100vh - 48px);
         max-height: calc(100vh - 48px);
+        border-radius: var(--vanna-border-radius-xl);
       }
 
-      .chat-layout.compact {
-        grid-template-columns: 1fr;
+      :host(.maximized) .chat-layout:hover {
+        transform: none;
       }
 
       .chat-main {
@@ -149,10 +146,7 @@ export class EasyQ2SqlChat extends LitElement {
         flex-direction: column;
         background: var(--chat-surface);
         min-height: 0;
-      }
-
-      .chat-layout.compact .chat-main {
-        border-right: none;
+        flex: 1;
       }
 
       .chat-header {
@@ -545,34 +539,6 @@ export class EasyQ2SqlChat extends LitElement {
         height: 18px;
       }
 
-      .sidebar {
-        background: linear-gradient(180deg, rgba(99, 102, 241, 0.08) 0%, rgba(15, 23, 42, 0.02) 100%);
-        padding: var(--vanna-space-6);
-        display: flex;
-        flex-direction: column;
-        gap: var(--vanna-space-4);
-        overflow-y: auto;
-        overflow-x: hidden;
-        min-height: 0;
-      }
-
-      .sidebar::-webkit-scrollbar {
-        width: 6px;
-      }
-
-      .sidebar::-webkit-scrollbar-track {
-        background: transparent;
-      }
-
-      .sidebar::-webkit-scrollbar-thumb {
-        background: var(--vanna-outline-default);
-        border-radius: var(--vanna-border-radius-full);
-      }
-
-      :host([theme="dark"]) .sidebar {
-        background: linear-gradient(180deg, rgba(79, 70, 229, 0.22) 0%, rgba(15, 23, 42, 0.45) 100%);
-      }
-
       .empty-state {
         display: flex;
         flex-direction: column;
@@ -650,26 +616,14 @@ export class EasyQ2SqlChat extends LitElement {
 
       @media (max-width: 880px) {
         .chat-layout {
-          grid-template-columns: 1fr;
           height: min(600px, 85vh);
           max-height: 85vh;
-        }
-
-        .sidebar {
-          display: none;
-        }
-
-        .chat-main {
-          border-right: none;
         }
       }
 
       @media (max-width: 600px) {
-        :host {
-          border-radius: var(--vanna-border-radius-xl);
-        }
-
         .chat-layout {
+          border-radius: var(--vanna-border-radius-xl);
           height: min(500px, 80vh);
           max-height: 80vh;
         }
@@ -725,6 +679,7 @@ export class EasyQ2SqlChat extends LitElement {
   @state() private statusMessage = '';
   @state() private statusDetail = '';
   private _windowState: 'normal' | 'maximized' | 'minimized' = 'normal';
+  private _messageCounter = 0;
 
   @property({ reflect: false })
   get windowState() {
@@ -849,11 +804,7 @@ export class EasyQ2SqlChat extends LitElement {
         if (detail && detail.messages && detail.messages.length > 0) {
           console.log('[EasyQ2SqlChat] Loading existing conversation:', storedId, detail.messages.length, 'messages');
           this.clearMessages();
-          for (const msg of detail.messages) {
-            if ((msg.role === 'user' || msg.role === 'assistant') && msg.content?.trim()) {
-              this.addMessage(msg.content, msg.role as 'user' | 'assistant');
-            }
-          }
+          this._renderHistoryMessages(detail.messages);
           if (detail.title) {
             this.title = detail.title;
           }
@@ -882,6 +833,194 @@ export class EasyQ2SqlChat extends LitElement {
     }));
   }
 
+  /**
+   * Render all history messages to match real-time interaction appearance.
+   *
+   * Real-time rendering (from agent SSE stream):
+   *   - User text        → <easyq2sql-message type="user"> bubble
+   *   - Assistant text   → RichTextComponent (markdown text block, NOT a bubble)
+   *   - Tool invocation  → StatusCard (briefly "Executing…") then replaced by tool's own
+   *                        CardComponent (e.g. "📋 Schema Search")
+   *   - Tool result      → tool's CardComponent / DataFrameComponent
+   *
+   * In history the original ui_component objects are lost — only result_for_llm text
+   * is stored.  We reconstruct cards that mirror each tool's native CardComponent format.
+   */
+  private _renderHistoryMessages(messages: ConversationMessage[]): void {
+    if (!this.componentManager) return;
+
+    // ------------------------------------------------------------------
+    // Pass 1 — build lookup maps
+    // ------------------------------------------------------------------
+    const toolCallNameMap = new Map<string, string>();       // call_id → tool name
+    const toolCallArgsMap = new Map<string, Record<string, any>>(); // call_id → args
+    const toolResultMap  = new Map<string, string>();       // call_id → result content
+
+    for (const msg of messages) {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          toolCallNameMap.set(tc.id, tc.name);
+          toolCallArgsMap.set(tc.id, tc.arguments);
+        }
+      } else if (msg.role === 'tool' && msg.tool_call_id) {
+        toolResultMap.set(msg.tool_call_id, msg.content || '');
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Helper — tool-specific result-card title & icon.
+    // These are taken VERBATIM from each tool's source code so history
+    // playback renders the exact same cards as the real-time SSE stream.
+    // ------------------------------------------------------------------
+    const getToolDisplay = (toolName: string) => {
+      switch (toolName) {
+        // --- schema_tools.py: CardComponent(title="📋 Schema Search", icon="🔍")
+        case 'search_table_schema':
+          return { title: `📋 Schema Search`, icon: '🔍' };
+        // --- metric_tools.py: CardComponent(title="Metric Search", icon="🔍📊")
+        case 'search_metrics':
+          return { title: `Metric Search`, icon: '🔍📊' };
+        // --- run_sql.py: DataFrameComponent(title="Query Results") — no icon
+        case 'run_sql':
+          return { title: 'Query Results', icon: '' };
+        // --- metric_tools.py: CardComponent(title="Metric: {name}") — no icon
+        case 'get_metric_detail':
+          return { title: 'Metric Detail', icon: '' };
+        // --- metric_tools.py: CardComponent(title="Defined Metrics") — no icon
+        case 'list_metrics':
+          return { title: `Defined Metrics`, icon: '' };
+        // --- metric_tools.py: DataFrameComponent(title="Metric: {name}") — no icon
+        case 'execute_metric':
+          return { title: 'Execute Metric', icon: '' };
+        // --- visualize_data.py: ArtifactComponent — no icon
+        case 'visualize_data':
+          return { title: 'Visualization', icon: '' };
+        // --- agent_memory.py: CardComponent(title="🧠 Memory Search", icon="🔍")
+        case 'search_saved_correct_tool_uses':
+          return { title: `🧠 Memory Search`, icon: '🔍' };
+        // --- agent_memory.py: save operations (no CardComponent in source)
+        case 'save_question_tool_args':
+        case 'save_text_memory':
+          return { title: 'Memory Saved', icon: '' };
+        // --- python.py: title="Command Result" — no icon
+        case 'run_python_code':
+          return { title: 'Command Result', icon: '' };
+        default:
+          return { title: `${toolName}`, icon: '' };
+      }
+    };
+
+    // ------------------------------------------------------------------
+    // Pass 2 — iterate in order; when we see an assistant with tool_calls
+    //          we look ahead to the matching tool results and render ONE
+    //          combined card per tool execution (tool_call + its result).
+    // ------------------------------------------------------------------
+    const renderedToolCalls = new Set<string>();
+
+    for (const msg of messages) {
+      const ts = msg.timestamp || new Date().toISOString();
+
+      if (msg.role === 'user') {
+        // User → chat bubble (same as real-time)
+        if (msg.content?.trim()) {
+          this.addMessage(msg.content, 'user');
+        }
+        continue;
+      }
+
+      if (msg.role === 'assistant') {
+        // Assistant text → RichTextComponent block, NOT a bubble
+        if (msg.content?.trim()) {
+          this._messageCounter++;
+          const textComp: RichComponent = {
+            id: `assistant-text-${this._messageCounter}`,
+            type: 'text',
+            lifecycle: 'create',
+            data: { content: msg.content, markdown: true },
+            children: [],
+            timestamp: ts,
+            visible: true,
+            interactive: false,
+          };
+          this.componentManager!.processUpdate({
+            operation: 'create', target_id: textComp.id,
+            component: textComp, timestamp: ts,
+          });
+        }
+
+        // Each tool_call → TWO cards, matching real-time:
+        //   1. StatusCard  (agent's): "⚙️ Executing {tool_name}" + arguments in metadata
+        //   2. Card / Text (tool's):  "📋 Schema Search" + result content
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            if (renderedToolCalls.has(tc.id)) continue;
+            renderedToolCalls.add(tc.id);
+
+            const resultContent = toolResultMap.get(tc.id) || '';
+            const args = toolCallArgsMap.get(tc.id) || {};
+
+            // --- Card 1: Agent StatusCard ("Executing …") ---
+            // agent.py ALWAYS uses icon="⚙️" for every tool's StatusCardComponent
+            this._messageCounter++;
+            const statusCard: RichComponent = {
+              id: `tool-exec-${tc.id}-${this._messageCounter}`,
+              type: 'status_card',
+              lifecycle: 'create',
+              data: {
+                title: `Executing ${tc.name}`,
+                status: 'success',
+                description: 'Tool completed successfully',
+                icon: '⚙️',
+                metadata: args,
+              },
+              children: [],
+              timestamp: ts,
+              visible: true,
+              interactive: false,
+            };
+            this.componentManager!.processUpdate({
+              operation: 'create', target_id: statusCard.id,
+              component: statusCard, timestamp: ts,
+            });
+
+            // --- Card 2: Tool's own result card ---
+            const { title, icon } = getToolDisplay(tc.name);
+            // Search tools are always collapsible (matching real-time SSE behavior)
+            const isSearchTool = ['search_table_schema', 'search_metrics', 'search_saved_correct_tool_uses'].includes(tc.name);
+            const isLong = isSearchTool || resultContent.length > 500;
+            this._messageCounter++;
+            const resultCard: RichComponent = {
+              id: `tool-result-${tc.id}-${this._messageCounter}`,
+              type: 'card',
+              lifecycle: 'create',
+              data: {
+                title,
+                content: resultContent || '*(no result content stored)*',
+                icon,
+                status: resultContent ? 'success' : 'info',
+                collapsible: isLong,
+                collapsed: isLong,
+                markdown: true,
+              },
+              children: [],
+              timestamp: ts,
+              visible: true,
+              interactive: false,
+            };
+            this.componentManager!.processUpdate({
+              operation: 'create', target_id: resultCard.id,
+              component: resultCard, timestamp: ts,
+            });
+          }
+        }
+        continue;
+      }
+
+      // tool messages are handled above (rendered inside their parent assistant's card)
+      // → skip
+    }
+  }
+
   /** Public API: load a specific conversation by ID. */
   async loadConversation(conversationId: string): Promise<void> {
     if (conversationId === this.conversationId) return;
@@ -894,11 +1033,7 @@ export class EasyQ2SqlChat extends LitElement {
       const detail = await this.getApiClient().getConversation(conversationId);
       if (detail) {
         if (detail.title) this.title = detail.title;
-        for (const msg of detail.messages) {
-          if ((msg.role === 'user' || msg.role === 'assistant') && msg.content?.trim()) {
-            this.addMessage(msg.content, msg.role as 'user' | 'assistant');
-          }
-        }
+        this._renderHistoryMessages(detail.messages);
       }
       setTimeout(() => this.scrollToLastMessage(), 100);
     } catch (e) {
@@ -991,11 +1126,6 @@ export class EasyQ2SqlChat extends LitElement {
 
   private async _sendMessageInternal(messageText: string): Promise<boolean> {
     console.log('_sendMessageInternal called with:', messageText);
-
-    // Auto-maximize window when user sends a message (if not already maximized or minimized)
-    if (this.windowState !== 'maximized' && this.windowState !== 'minimized') {
-      this.maximizeWindow();
-    }
 
     // Create user message as a rich component and send to ComponentManager
     const userRichComponent: RichComponent = {
@@ -1148,8 +1278,9 @@ export class EasyQ2SqlChat extends LitElement {
 
   addMessage(content: string, type: 'user' | 'assistant' | 'tool') {
     // Create message as a rich component and send to ComponentManager
+    this._messageCounter++;
     const richComponent: RichComponent = {
-      id: `${type}-message-${Date.now()}`,
+      id: `${type}-message-${Date.now()}-${this._messageCounter}`,
       type: `${type}-message`,
       lifecycle: 'create',
       data: {
@@ -1186,7 +1317,7 @@ export class EasyQ2SqlChat extends LitElement {
   }
 
   getProgressTracker(): HTMLElement | null {
-    return this.shadowRoot?.querySelector('easyq2sql-progress-tracker') || null;
+    return document.querySelector('easyq2sql-progress-tracker') || null;
   }
 
   private async handleStreamingResponse(request: any) {
@@ -1389,17 +1520,15 @@ export class EasyQ2SqlChat extends LitElement {
    */
   scrollToLastMessage() {
     const messagesContainer = this.shadowRoot?.querySelector('.chat-messages');
-    const richContainer = this.shadowRoot?.querySelector('.rich-components-container');
-    
-    if (!messagesContainer || !richContainer) return;
 
-    // Get the last child element (the most recently added component)
-    const lastComponent = richContainer.lastElementChild as HTMLElement;
-    if (!lastComponent) return;
+    if (!messagesContainer) return;
 
-    // Scroll so the top of the last component is visible
-    lastComponent.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    
+    // Scroll only the chat-messages container, not the whole page
+    messagesContainer.scrollTo({
+      top: messagesContainer.scrollHeight,
+      behavior: 'smooth',
+    });
+
     // Update scroll indicator after scrolling
     setTimeout(() => this.updateScrollIndicator(), 100);
   }
@@ -1440,7 +1569,7 @@ export class EasyQ2SqlChat extends LitElement {
       ` : ''}
 
       <!-- Main chat interface -->
-      <div class="chat-layout ${this.showProgress ? '' : 'compact'}">
+      <div class="chat-layout">
         <div class="chat-main">
           <div class="chat-header">
             <div class="header-top">
@@ -1534,11 +1663,6 @@ export class EasyQ2SqlChat extends LitElement {
           </div>
         </div>
 
-        ${this.showProgress ? html`
-          <div class="sidebar">
-            <easyq2sql-progress-tracker theme=${this.theme}></easyq2sql-progress-tracker>
-          </div>
-        ` : ''}
       </div>
     `;
   }

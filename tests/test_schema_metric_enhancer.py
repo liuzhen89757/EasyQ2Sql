@@ -6,11 +6,7 @@ fail-open behavior on errors, and empty/invalid input handling.
 """
 
 import pytest
-from easyq2sql.capabilities.metric_store import (
-    FunctionStep,
-    Metric,
-    MetricDimension,
-)
+from easyq2sql.capabilities.metric_store import Metric
 from easyq2sql.capabilities.schema_store import ColumnSchema, TableSchema
 from easyq2sql.core.user import User
 
@@ -103,7 +99,7 @@ class MockMetricStore:
         return self.metrics
 
     async def get_metrics_by_table(self, table_name, context):
-        return [m for m in self.metrics if m.analysis_table == table_name]
+        return [m for m in self.metrics if m.data_source == table_name]
 
 
 # ---------------------------------------------------------------------------
@@ -160,25 +156,19 @@ def sample_metrics():
             id="metric_sales",
             name="Total Sales",
             description="Sum of all order amounts",
-            analysis_table="orders",
+            business_definition="Sum of all order amounts",
+            calculation_logic="SUM",
+            data_source="orders",
             analysis_field="orders.amount",
-            dimensions=[
-                MetricDimension(name="Order Date", field_ref="orders.order_date"),
-            ],
-            function_steps=[
-                FunctionStep(category="aggregate", function_name="SUM",
-                             field_ref="orders.amount"),
-            ],
         ),
         Metric(
             id="metric_customers",
             name="Customer Count",
-            analysis_table="orders",
+            description="Number of unique customers",
+            business_definition="Number of unique customers",
+            calculation_logic="COUNT_DISTINCT",
+            data_source="orders",
             analysis_field="orders.customer_id",
-            function_steps=[
-                FunctionStep(category="aggregate", function_name="COUNT_DISTINCT",
-                             field_ref="orders.customer_id"),
-            ],
         ),
     ]
 
@@ -253,8 +243,8 @@ class TestSchemaMetricContextEnhancer:
         assert "customers" in enhanced.lower()
 
     @pytest.mark.asyncio
-    async def test_includes_metric_function_steps(self, enhancer, test_user):
-        """Test that metric function steps are included in the context."""
+    async def test_includes_metric_calculation_logic(self, enhancer, test_user):
+        """Test that metric calculation logic is included in the context."""
         base_prompt = "You are a SQL assistant."
         user_message = "total sales metric"
 
@@ -262,7 +252,9 @@ class TestSchemaMetricContextEnhancer:
             base_prompt, user_message, test_user
         )
 
-        assert "SUM(orders.amount)" in enhanced
+        assert "Total Sales" in enhanced
+        assert "SUM" in enhanced
+        assert "orders.amount" in enhanced
 
     @pytest.mark.asyncio
     async def test_includes_metric_usage_hints(self, enhancer, test_user):
@@ -275,7 +267,7 @@ class TestSchemaMetricContextEnhancer:
         )
 
         assert "execute_metric" in enhanced.lower()
-        assert "metric_id" in enhanced.lower()
+        assert "search_metrics" in enhanced.lower()
 
     @pytest.mark.asyncio
     async def test_empty_user_message_returns_original(self, enhancer, test_user):

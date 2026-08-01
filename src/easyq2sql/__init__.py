@@ -87,7 +87,6 @@ from .capabilities import (
     ColumnSchema,
     JoinClause,
     Metric,
-    MetricDimension,
     MetricSearchResult,
     MetricStore,
     SchemaSearchResult,
@@ -180,7 +179,6 @@ __all__ = [
     # Capabilities - Metric
     "MetricStore",
     "Metric",
-    "MetricDimension",
     "JoinClause",
     "MetricSearchResult",
     # Basic implementations

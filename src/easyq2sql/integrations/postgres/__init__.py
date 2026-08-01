@@ -5,6 +5,8 @@ Provides PostgreSQL-based implementations of core capabilities:
 - PostgresRunner: SQL execution
 - PostgresSchemaStore: Schema storage with pgvector search
 - PostgresMetricStore: Metric storage with pgvector search
+- PostgresDimensionStore: Dimension storage with pgvector search
+- PostgresTerminologyStore: Terminology mapping with pgvector search
 - PostgresAgentMemory: Agent memory with pgvector search
 
 All store implementations use PostgreSQL + pgvector to store both raw data
@@ -37,6 +39,8 @@ def get_device() -> str:
 from .sql_runner import PostgresRunner
 from .schema_store import PostgresSchemaStore
 from .metric_store import PostgresMetricStore
+from .dimension_store import PostgresDimensionStore
+from .terminology_store import PostgresTerminologyStore
 from .agent_memory import PostgresAgentMemory
 from .embedding import EmbeddingHelper
 
@@ -44,6 +48,8 @@ __all__ = [
     "PostgresRunner",
     "PostgresSchemaStore",
     "PostgresMetricStore",
+    "PostgresDimensionStore",
+    "PostgresTerminologyStore",
     "PostgresAgentMemory",
     "EmbeddingHelper",
     "get_device",

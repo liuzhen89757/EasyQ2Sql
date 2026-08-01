@@ -1,8 +1,9 @@
 """
 Metric-related LLM tools for semantic metric search and execution.
 
-These tools let the LLM agent discover user-defined business metrics,
-retrieve their definitions, and execute them against the database.
+The LLM only sees metric tools. Terminology mapping and dimension lookup
+are resolved internally by ``SearchMetricsTool`` — the LLM is unaware of
+the underlying terminology / dimension stores.
 """
 
 from typing import Any, Dict, List, Optional, Type
@@ -11,7 +12,7 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from easyq2sql.capabilities.metric_store import MetricStore
-from easyq2sql.capabilities.sql_runner import SqlRunner, RunSqlToolArgs
+from easyq2sql.capabilities.sql_runner import RunSqlToolArgs, SqlRunner
 from easyq2sql.components import (
     CardComponent,
     DataFrameComponent,
@@ -22,40 +23,70 @@ from easyq2sql.components import (
 from easyq2sql.core.tool import Tool, ToolContext, ToolResult
 
 
-class SearchMetricsArgs(BaseModel):
-    """Arguments for searching metrics by natural language query."""
+# ---------------------------------------------------------------------------
+# Argument models
+# ---------------------------------------------------------------------------
 
-    query: str = Field(
-        description="Keywords for vector search against metric names, descriptions, "
-        "analysis fields, and dimension names. Extract business concepts, "
-        "measure names, and calculation terms — do NOT pass the raw user question verbatim."
+
+class DimensionFilter(BaseModel):
+    """A categorical dimension extracted from the user's question.
+
+    Dimensions are qualitative attributes used to filter, group, or label data.
+    They are NOT numeric measures — those go in ``metric``.
+    """
+
+    name: str = Field(
+        description="Dimension name — the categorical attribute referenced by "
+        "the user. May be a filter key (WHERE), a grouping column (GROUP BY), "
+        "or a descriptive label to include in output (e.g. fund manager name, "
+        "product code, time period)."
+    )
+    value: Optional[str] = Field(
+        default=None,
+        description="Dimension value — only set when the user specifies a "
+        "concrete filter condition. Leave as None for grouping keys and "
+        "descriptive label columns.",
+    )
+
+
+class SearchMetricsArgs(BaseModel):
+    """Structured metric + dimension search parameters.
+
+    **Metric**: numeric, measurable, computable (SUM/AVG/COUNT).
+    **Dimension**: categorical, used for filtering, grouping, or labeling.
+    """
+
+    metric: str = Field(
+        description="The metric (numeric measure) to search for. "
+        "Extract the core computable concept from the user's question."
+    )
+    dimensions: List[DimensionFilter] = Field(
+        default_factory=list,
+        description="Categorical dimensions referenced by the user. "
+        "Set ``value`` only for filter conditions; omit for grouping keys "
+        "and label columns."
     )
     limit: int = Field(
-        default=3,
-        description="Maximum number of matching metrics to return",
+        default=5,
+        description="Maximum number of matching results to return",
     )
 
 
 class GetMetricDetailArgs(BaseModel):
     """Arguments for retrieving a metric's full definition."""
 
-    metric_id: str = Field(
-        description="The ID of the metric to retrieve"
-    )
+    metric_id: str = Field(description="The ID of the metric to retrieve")
 
 
 class ListMetricsArgs(BaseModel):
     """Arguments for listing all defined metrics. No parameters needed."""
-
     pass
 
 
 class ExecuteMetricArgs(BaseModel):
     """Arguments for executing a metric against the database."""
 
-    metric_id: str = Field(
-        description="The ID of the metric to execute"
-    )
+    metric_id: str = Field(description="The ID of the metric to execute")
     filters: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional filter conditions, e.g. {'date': '2024-Q4', 'region': 'East'}",
@@ -70,27 +101,55 @@ class ExecuteMetricArgs(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _format_metric_for_llm(metric) -> str:
-    """Format a single metric for LLM consumption, including JOIN info."""
-    lines = [
-        f"# Metric: {metric.name}({metric.analysis_field})",
-    ]
-    if metric.description:
-        lines.append(f"Description: {metric.description}")
 
-    if metric.dimensions:
-        for d in metric.dimensions:
-            lines.append(f"##Dimension: {d.name}({d.field_ref})")
-            if d.joins:
-                join_strs = [
-                    f"{j.source_table}.{j.source_column} = {j.target_table}.{j.target_column}"
-                    for j in d.joins
-                ]
-                lines.append(f"Joins: {'; '.join(join_strs)}")
+def _format_metric_for_llm(metric, display_name: str | None = None) -> str:
+    """Format a single metric for LLM consumption."""
+    lines = [f"# Metric: {display_name or metric.name}"]
+    if metric.business_definition:
+        lines.append(f"Business Definition: {metric.business_definition}")
+    if metric.calculation_logic:
+        lines.append(f"Calculation: {metric.calculation_logic}")
+    if metric.data_source:
+        lines.append(f"Data Source: {metric.data_source}")
+    if metric.analysis_field:
+        lines.append(f"Analysis Field: {metric.analysis_field}")
+    return "\n".join(lines)
 
-    if metric.generated_sql_template:
-        lines.append(f"\nGenerated SQL Template:\n{metric.generated_sql_template}")
 
+def _format_dimension_for_llm(dim, display_name: str | None = None) -> str:
+    """Format a single dimension for LLM consumption."""
+    lines = [f"# Dimension: {display_name or dim.name}"]
+    if dim.business_definition:
+        lines.append(f"Business Definition: {dim.business_definition}")
+    if dim.data_source:
+        lines.append(f"Data Source: {dim.data_source}")
+    if dim.field_ref:
+        lines.append(f"Analysis Field: {dim.field_ref}")
+    if dim.value_range:
+        lines.append(f"Value Range: {dim.value_range}")
+    if dim.joins:
+        join_strs = []
+        for j in dim.joins:
+            src = j.source_column if j.source_column.startswith(j.source_table + ".") else f"{j.source_table}.{j.source_column}"
+            tgt = j.target_column if j.target_column.startswith(j.target_table + ".") else f"{j.target_table}.{j.target_column}"
+            join_strs.append(f"{src} = {tgt}")
+        lines.append(f"Joins: {'; '.join(join_strs)}")
+    return "\n".join(lines)
+
+
+def _format_metric_with_dimensions(metric, dimensions: List, display_name: str | None = None) -> str:
+    """Format a metric with all its linked dimensions."""
+    lines = [f"# Metric: {display_name or metric.name}"]
+    if metric.business_definition:
+        lines.append(f"Business Definition: {metric.business_definition}")
+    if metric.calculation_logic:
+        lines.append(f"Calculation Logic: {metric.calculation_logic}")
+    if metric.data_source:
+        lines.append(f"Data Source: {metric.data_source}")
+    if metric.analysis_field:
+        lines.append(f"Analysis Field: {metric.analysis_field}")
+    for dim in dimensions:
+        lines.append(f"##Dimension: {dim.name}({dim.field_ref})")
     return "\n".join(lines)
 
 
@@ -100,14 +159,26 @@ def _format_metric_for_llm(metric) -> str:
 
 
 class SearchMetricsTool(Tool[SearchMetricsArgs]):
-    """Search for business metrics by natural language description.
+    """Search for business metrics, dimensions, and terminology.
 
-    Uses hybrid search (vector + keyword with RRF fusion).
-    Returns up to ``limit`` results (default 1).
+    **This is the LLM's only entry point.** Internally:
+    1. Terminology mapping search
+    2. Resolve matched terms → metrics/dimensions
+    3. Fallback: direct metric + dimension search
+    4. Assemble structured results
+
+    Returns metric definitions with their linked dimensions and JOIN info.
     """
 
-    def __init__(self, metric_store: MetricStore):
+    def __init__(
+        self,
+        metric_store: MetricStore,
+        terminology_store=None,
+        dimension_store=None,
+    ):
         self.metric_store = metric_store
+        self.terminology_store = terminology_store
+        self.dimension_store = dimension_store
 
     @property
     def name(self) -> str:
@@ -116,27 +187,159 @@ class SearchMetricsTool(Tool[SearchMetricsArgs]):
     @property
     def description(self) -> str:
         return (
-            "Retrieve relevant pre-defined business metrics for the user's question. "
-            "Call once with a keyword query covering all business concepts the user mentioned. "
-            "Returns metric names, analysis fields, dimensions, JOIN logic, and SQL templates."
+            "Search business metrics and dimensions. "
+            "Returns metric definitions, analysis fields, JOIN logic, and SQL templates. "
+            "\n\n"
+            "**Call this tool ONLY after search_saved_correct_tool_uses returned no usable SQL.** "
+            "Wait for search_saved_correct_tool_uses result first — do NOT call both in parallel."
         )
 
     def get_args_schema(self) -> Type[SearchMetricsArgs]:
         return SearchMetricsArgs
 
+    @staticmethod
+    def _build_search_query(metric: str, dimensions: List[DimensionFilter]) -> str:
+        """Combine metric and dimension filters into a structured query string.
+
+        Format::
+
+            # metric: FundReturnMean
+            # dimensions: market||Shenzhen          (filter: name + value)
+            # dimensions: region                     (group/label: name only)
+        """
+        lines = [f"# metric: {metric}"]
+        for dim in dimensions:
+            if dim.value:
+                lines.append(f"# dimensions: {dim.name}|{dim.value}")
+            else:
+                lines.append(f"# dimensions: {dim.name}")
+        return "\n".join(lines)
+
     async def execute(
         self, context: ToolContext, args: SearchMetricsArgs
     ) -> ToolResult:
-        """Search metrics with hybrid retrieval + RRF re-rank, return top 1."""
+        """Search metrics with terminology resolution + fallback."""
         try:
-            results = await self.metric_store.search_metrics(
-                query=args.query,
-                context=context,
-                limit=args.limit,
-            )
+            result_parts: List[str] = []
+            match_count = 0
 
-            if not results:
-                no_result_msg = "No matching metrics found."
+            search_query = self._build_search_query(args.metric, args.dimensions)
+
+            # --- Step 1: Terminology search ---
+            term_results = []
+            if self.terminology_store:
+                try:
+                    term_results = await self.terminology_store.search_terminology(
+                        query=search_query,
+                        context=context,
+                        limit=args.limit * 2,
+                    )
+                except Exception:
+                    pass  # Fail-open: fall through to direct search
+
+            if term_results:
+                metric_ids_seen = set()
+                dim_ids_seen = set()
+
+                for tr in term_results:
+                    entry = tr.entry
+
+                    if entry.target_type == "metric":
+                        if entry.target_id in metric_ids_seen:
+                            continue
+                        metric_ids_seen.add(entry.target_id)
+
+                        metric = await self.metric_store.get_metric(
+                            entry.target_id, context
+                        )
+                        if metric is None:
+                            continue
+
+                        # Fetch linked dimensions
+                        dims = []
+                        if self.dimension_store:
+                            try:
+                                dims = await self.dimension_store.get_dimensions_by_metric(
+                                    metric.id, context
+                                )
+                            except Exception:
+                                pass
+
+                        formatted = _format_metric_with_dimensions(metric, dims, display_name=entry.term_text)
+                        first_line, _, rest = formatted.partition("\n")
+                        result_parts.append(f"{first_line} [similarity: {tr.similarity_score:.4f}]\n{rest}" if rest else f"{first_line} [similarity: {tr.similarity_score:.4f}]")
+                        match_count += 1
+
+                    elif entry.target_type == "dimension":
+                        if entry.target_id in dim_ids_seen:
+                            continue
+                        dim_ids_seen.add(entry.target_id)
+
+                        if self.dimension_store:
+                            try:
+                                dim = await self.dimension_store.get_dimension(
+                                    entry.target_id, context
+                                )
+                                if dim is None:
+                                    continue
+                                formatted = _format_dimension_for_llm(dim, display_name=entry.term_text)
+                                first_line, _, rest = formatted.partition("\n")
+                                result_parts.append(f"{first_line} [similarity: {tr.similarity_score:.4f}]\n{rest}" if rest else f"{first_line} [similarity: {tr.similarity_score:.4f}]")
+                                match_count += 1
+                            except Exception:
+                                pass
+
+                    # Step 1 limit enforcement — term_results are sorted by
+                    # similarity; stop once we have enough matches.
+                    if match_count >= args.limit:
+                        break
+
+            # --- Step 2: Fallback — direct metric search ---
+            if not result_parts:
+                metric_results = await self.metric_store.search_metrics(
+                    query=search_query,
+                    context=context,
+                    limit=args.limit,
+                )
+
+                for mr in metric_results:
+                    metric = mr.metric
+                    # Fetch linked dimensions
+                    dims = []
+                    if self.dimension_store:
+                        try:
+                            dims = await self.dimension_store.get_dimensions_by_metric(
+                                metric.id, context
+                            )
+                        except Exception:
+                            pass
+
+                    formatted = _format_metric_with_dimensions(metric, dims)
+                    first_line, _, rest = formatted.partition("\n")
+                    result_parts.append(f"{first_line} [similarity: {mr.similarity_score:.4f}]\n{rest}" if rest else f"{first_line} [similarity: {mr.similarity_score:.4f}]")
+                    match_count += 1
+
+            # --- Step 3: Also search dimensions directly as fallback ---
+            if self.dimension_store and (not result_parts or len(result_parts) < args.limit):
+                try:
+                    dim_results = await self.dimension_store.search_dimensions(
+                        query=search_query,
+                        context=context,
+                        limit=max(2, args.limit - len(result_parts)),
+                    )
+                    for dr in dim_results:
+                        dim = dr.dimension
+                        formatted = _format_dimension_for_llm(dim)
+                        if formatted not in result_parts:
+                            first_line, _, rest = formatted.partition("\n")
+                            result_parts.append(f"{first_line} [similarity: {dr.similarity_score:.4f}]\n{rest}" if rest else f"{first_line} [similarity: {dr.similarity_score:.4f}]")
+                            match_count += 1
+                except Exception:
+                    pass
+
+            # --- Step 4: Assemble results ---
+            if not result_parts:
+                no_result_msg = "No matching metrics, dimensions, or terminology found."
                 return ToolResult(
                     success=True,
                     result_for_llm=no_result_msg,
@@ -146,35 +349,15 @@ class SearchMetricsTool(Tool[SearchMetricsArgs]):
                     ),
                 )
 
-            # Hybrid search results already re-ranked & truncated by the store
-            docs = [r.document_text for r in results if r.document_text]
-            result_text = "\n\n".join(docs) if docs else "No matching metrics found."
-
-            # Build UI card — detailed format with collapsible card
-            detailed_content = "**Retrieved metrics passed to LLM:**\n\n"
-            for i, r in enumerate(results, 1):
-                m = r.metric
-                detailed_content += f"**{i}. {m.name}** (similarity: {r.similarity_score:.6f})\n"
-                if m.description:
-                    detailed_content += f"- **Description:** {m.description}\n"
-                detailed_content += f"- **Field:** `{m.analysis_table}.{m.analysis_field}`\n"
-                if m.dimensions:
-                    dim_names = [d.name for d in m.dimensions]
-                    detailed_content += f"- **Dimensions:** `{'`, `'.join(dim_names)}`\n"
-                if m.generated_sql_template:
-                    sql_preview = m.generated_sql_template[:200]
-                    if len(m.generated_sql_template) > 200:
-                        sql_preview += "..."
-                    detailed_content += f"- **SQL:** `{sql_preview}`\n"
-                detailed_content += "\n"
+            result_text = "\n\n".join(result_parts)
 
             return ToolResult(
                 success=True,
                 result_for_llm=result_text,
                 ui_component=UiComponent(
                     rich_component=CardComponent(
-                        title=f"🎯 Metric Search: {len(results)} Metric(s)",
-                        content=detailed_content.strip(),
+                        title=f"📊 Metric Search · {match_count} results",
+                        content=result_text,
                         icon="🔍",
                         status="info",
                         collapsible=True,
@@ -183,7 +366,7 @@ class SearchMetricsTool(Tool[SearchMetricsArgs]):
                     ),
                     simple_component=SimpleTextComponent(text=result_text),
                 ),
-                metadata={"match_count": len(results)},
+                metadata={"match_count": match_count},
             )
 
         except Exception as e:
@@ -195,10 +378,11 @@ class SearchMetricsTool(Tool[SearchMetricsArgs]):
 
 
 class GetMetricDetailTool(Tool[GetMetricDetailArgs]):
-    """Retrieve the full definition of a specific metric including JOINs and SQL template."""
+    """Retrieve the full definition of a specific metric including its dimensions."""
 
-    def __init__(self, metric_store: MetricStore):
+    def __init__(self, metric_store: MetricStore, dimension_store=None):
         self.metric_store = metric_store
+        self.dimension_store = dimension_store
 
     @property
     def name(self) -> str:
@@ -219,10 +403,9 @@ class GetMetricDetailTool(Tool[GetMetricDetailArgs]):
     async def execute(
         self, context: ToolContext, args: GetMetricDetailArgs
     ) -> ToolResult:
-        """Retrieve and format a single metric's full definition with JOIN info."""
+        """Retrieve and format a single metric's full definition with dimensions."""
         try:
             metric = await self.metric_store.get_metric(args.metric_id, context)
-
             if metric is None:
                 not_found_msg = f"Metric '{args.metric_id}' not found."
                 return ToolResult(
@@ -231,7 +414,17 @@ class GetMetricDetailTool(Tool[GetMetricDetailArgs]):
                     error=not_found_msg,
                 )
 
-            result_text = _format_metric_for_llm(metric)
+            # Fetch linked dimensions
+            dims = []
+            if self.dimension_store:
+                try:
+                    dims = await self.dimension_store.get_dimensions_by_metric(
+                        metric.id, context
+                    )
+                except Exception:
+                    pass
+
+            result_text = _format_metric_with_dimensions(metric, dims)
 
             return ToolResult(
                 success=True,
@@ -270,8 +463,7 @@ class ListMetricsTool(Tool[ListMetricsArgs]):
         return (
             "List all pre-defined business metrics. "
             "Use this to discover what metrics are available before deciding "
-            "which one to use. Returns a summary of each metric including "
-            "dimensions and JOIN relationships."
+            "which one to use. Returns a summary of each metric."
         )
 
     def get_args_schema(self) -> Type[ListMetricsArgs]:
@@ -280,7 +472,7 @@ class ListMetricsTool(Tool[ListMetricsArgs]):
     async def execute(
         self, context: ToolContext, args: ListMetricsArgs
     ) -> ToolResult:
-        """List all metrics with JOIN info in the summary."""
+        """List all metrics."""
         try:
             metrics = await self.metric_store.list_metrics(context)
 
@@ -295,10 +487,7 @@ class ListMetricsTool(Tool[ListMetricsArgs]):
                     ),
                 )
 
-            summaries = []
-            for m in metrics:
-                summaries.append(_format_metric_for_llm(m))
-
+            summaries = [_format_metric_for_llm(m) for m in metrics]
             result_text = f"Found {len(metrics)} defined metrics:\n\n" + "\n\n".join(summaries)
 
             return ToolResult(
@@ -306,7 +495,7 @@ class ListMetricsTool(Tool[ListMetricsArgs]):
                 result_for_llm=result_text,
                 ui_component=UiComponent(
                     rich_component=CardComponent(
-                        title=f"Defined Metrics ({len(metrics)})",
+                        title="Defined Metrics",
                         content=result_text,
                         markdown=True,
                     ),
@@ -330,9 +519,15 @@ class ExecuteMetricTool(Tool[ExecuteMetricArgs]):
     then executes it and returns the results.
     """
 
-    def __init__(self, metric_store: MetricStore, sql_runner: SqlRunner):
+    def __init__(
+        self,
+        metric_store: MetricStore,
+        sql_runner: SqlRunner,
+        dimension_store=None,
+    ):
         self.metric_store = metric_store
         self.sql_runner = sql_runner
+        self.dimension_store = dimension_store
 
     @property
     def name(self) -> str:
@@ -350,29 +545,38 @@ class ExecuteMetricTool(Tool[ExecuteMetricArgs]):
     def get_args_schema(self) -> Type[ExecuteMetricArgs]:
         return ExecuteMetricArgs
 
-    def _build_metric_sql(self, metric) -> str:
-        """Build a SQL query from the metric's dimensions and JOINs.
+    async def _get_dimensions(self, metric, context: ToolContext) -> List:
+        """Fetch dimensions for a metric using the given context."""
+        if self.dimension_store:
+            try:
+                return await self.dimension_store.get_dimensions_by_metric(
+                    metric.id, context
+                )
+            except Exception:
+                pass
+        return []
 
-        Uses COUNT on the analysis_field as the default aggregation.
-        Dimension fields are added to SELECT and GROUP BY.
-        Dimension JOINs are included in the FROM clause.
-        """
+    def _build_metric_sql(self, metric, dimensions: List) -> str:
+        """Build a SQL query from the metric and its dimensions."""
+        # Alias derived from metric name
+        alias = metric.name.replace(" ", "_").lower()
 
-        # Use pre-generated SQL template if available
-        if metric.generated_sql_template:
-            return metric.generated_sql_template
+        # SELECT: use calculation_logic if defined, else select field directly
+        calc = metric.calculation_logic.strip() if metric.calculation_logic else None
+        if calc:
+            select_parts = [f"{calc}({metric.analysis_field}) AS {alias}"]
+        else:
+            select_parts = [f"{metric.analysis_field} AS {alias}"]
 
-        # SELECT: COUNT on analysis field + dimension fields
-        select_parts = [f"COUNT({metric.analysis_field}) AS count"]
-        for dim in metric.dimensions:
+        for dim in dimensions:
             if dim.field_ref not in select_parts:
                 select_parts.insert(0, dim.field_ref)
 
-        # FROM + JOINs from per-dimension joins
-        from_clause = f"FROM {metric.analysis_table}"
+        # FROM + JOINs
+        from_clause = f"FROM {metric.data_source}"
         join_clauses = []
-        seen_tables = {metric.analysis_table}
-        for dim in metric.dimensions:
+        seen_tables = {metric.data_source}
+        for dim in dimensions:
             for join in dim.joins:
                 if join.target_table not in seen_tables:
                     join_clauses.append(
@@ -382,13 +586,12 @@ class ExecuteMetricTool(Tool[ExecuteMetricArgs]):
                     )
                     seen_tables.add(join.target_table)
 
-        # GROUP BY from dimensions
-        group_parts = [dim.field_ref for dim in metric.dimensions]
+        # GROUP BY: only needed when an aggregate function is present
+        group_parts = []
+        if calc and dimensions:
+            group_parts = [dim.field_ref for dim in dimensions]
 
-        sql_parts = [
-            "SELECT " + ",\n       ".join(select_parts),
-            from_clause,
-        ]
+        sql_parts = ["SELECT " + ",\n       ".join(select_parts), from_clause]
         if join_clauses:
             sql_parts.extend(join_clauses)
         if group_parts:
@@ -409,14 +612,15 @@ class ExecuteMetricTool(Tool[ExecuteMetricArgs]):
                     error=f"Metric '{args.metric_id}' not found.",
                 )
 
+            dimensions = await self._get_dimensions(metric, context)
+
             # Build and execute SQL
-            sql = self._build_metric_sql(metric)
+            sql = self._build_metric_sql(metric, dimensions)
             df: pd.DataFrame = await self.sql_runner.run_sql(
                 RunSqlToolArgs(sql=sql), context
             )
 
-            # Include metric definition and JOIN info in the result
-            header = _format_metric_for_llm(metric)
+            header = _format_metric_with_dimensions(metric, dimensions)
 
             if df.empty:
                 return ToolResult(
@@ -432,7 +636,6 @@ class ExecuteMetricTool(Tool[ExecuteMetricArgs]):
                     ),
                 )
 
-            # Format results
             rows = df.to_dict("records")
             csv_preview = df.to_csv(index=False)
             if len(csv_preview) > 2000:

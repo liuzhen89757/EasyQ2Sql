@@ -191,7 +191,7 @@ class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
                 if show_detailed_results:
                     ui_component = UiComponent(
                         rich_component=CardComponent(
-                            title="🧠 Memory Search: 0 Results",
+                            title="🧠 Memory Search",
                             content="No similar tool usage patterns found for this question.\n\nSearched agent memory with no matches.",
                             icon="🔍",
                             status="info",
@@ -263,7 +263,7 @@ class SearchSavedCorrectToolUsesTool(Tool[SearchSavedCorrectToolUsesParams]):
                     detailed_content += "\n"
                 ui_component = UiComponent(
                     rich_component=CardComponent(
-                        title=f"🧠 Memory Search: {len(results)} Result(s)",
+                        title="🧠 Memory Search",
                         content=detailed_content.strip(),
                         icon="🔍",
                         status="info",

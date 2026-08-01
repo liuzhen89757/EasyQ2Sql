@@ -1,9 +1,9 @@
 """
-PostgreSQL + pgvector implementation of MetricStore.
+PostgreSQL + pgvector implementation of TerminologyStore.
 
-Single-table design. Each metric is stored as one row with its own
-embedding for vector search. Dimensions are managed independently by
-``PostgresDimensionStore``.
+Maps business terms (natural language) to metrics or dimensions.
+Supports both manually configured entries and auto-generated entries
+.
 """
 
 import asyncio
@@ -11,11 +11,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Optional
 
-from easyq2sql.capabilities.metric_store import (
-    JoinClause,
-    Metric,
-    MetricSearchResult,
-    MetricStore,
+from easyq2sql.capabilities.terminology_store import (
+    TerminologyEntry,
+    TerminologySearchResult,
+    TerminologyStore,
 )
 from easyq2sql.core.search import CrossEncoderReranker
 from easyq2sql.core.tool import ToolContext
@@ -24,32 +23,27 @@ from .config import (
     CE_CANDIDATE_MULTIPLIER,
     DEFAULT_CROSS_ENCODER_MODEL,
     DEFAULT_EMBEDDING_MODEL,
-    DEFAULT_METRIC_STORE_TABLE,
+    DEFAULT_TERMINOLOGY_TABLE
 )
 from .embedding import EmbeddingHelper
 
 
-class PostgresMetricStore(MetricStore):
-    """PostgreSQL + pgvector MetricStore — single-table design.
+class PostgresTerminologyStore(TerminologyStore):
+    """PostgreSQL + pgvector TerminologyStore.
 
-    **metric_definitions**::
+    **terminology_mappings**::
 
         id                  TEXT PRIMARY KEY
-        name                TEXT NOT NULL
+        term_text           TEXT NOT NULL
+        target_type         TEXT NOT NULL  — 'metric' | 'dimension'
+        target_id           TEXT NOT NULL
         business_definition TEXT DEFAULT ''
-        calculation_logic   TEXT DEFAULT ''
-        data_source         TEXT DEFAULT ''
-        analysis_field      TEXT DEFAULT ''
-        description         TEXT DEFAULT ''
-        created_by          TEXT DEFAULT ''
+        synonyms_json       JSONB DEFAULT '[]'
+        source              TEXT DEFAULT 'manual'
         created_at          TIMESTAMP
-        updated_at          TIMESTAMP
         embedding           vector(N)
         search_text         TEXT
         search_tsv          tsvector GENERATED ALWAYS
-
-    Search uses hybrid retrieval (vector + keyword with RRF fusion)
-    followed by optional Cross-Encoder re-rank.
     """
 
     DDL = """
@@ -57,18 +51,18 @@ class PostgresMetricStore(MetricStore):
 
     CREATE TABLE IF NOT EXISTS {table} (
         id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
+        term_text TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
         business_definition TEXT DEFAULT '',
-        calculation_logic TEXT DEFAULT '',
-        data_source TEXT DEFAULT '',
-        analysis_field TEXT DEFAULT '',
-        description TEXT DEFAULT '',
-        created_by TEXT DEFAULT '',
+        synonyms_json JSONB DEFAULT '[]',
+        source TEXT DEFAULT 'manual',
         created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW(),
         embedding vector({vector_dim}),
         search_text TEXT DEFAULT ''
     );
+
+    CREATE INDEX IF NOT EXISTS {table}_target_idx ON {table} (target_type, target_id);
 
     CREATE INDEX IF NOT EXISTS {table}_embedding_idx
         ON {table} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
@@ -88,11 +82,11 @@ class PostgresMetricStore(MetricStore):
         database: Optional[str] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
-        table_name: str = DEFAULT_METRIC_STORE_TABLE,
+        table_name: str = DEFAULT_TERMINOLOGY_TABLE,
         embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         cross_encoder_model: Optional[str] = DEFAULT_CROSS_ENCODER_MODEL,
         device: Optional[str] = None,
-        terminology_store=None,
+        metric_store=None,
         dimension_store=None,
     ):
         if connection_string:
@@ -119,7 +113,7 @@ class PostgresMetricStore(MetricStore):
             if cross_encoder_model
             else None
         )
-        self._terminology_store = terminology_store
+        self._metric_store = metric_store
         self._dimension_store = dimension_store
         self._executor.submit(self._embedding_helper._get_model)
 
@@ -153,7 +147,6 @@ class PostgresMetricStore(MetricStore):
         return conn
 
     def _ensure_table(self, conn):
-        """Create table and auto-migrate embedding dimension if model changed."""
         import hashlib
         import re
 
@@ -212,52 +205,63 @@ class PostgresMetricStore(MetricStore):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _format_search_text(metric: Metric) -> str:
-        """Build embedding text for a metric.
+    def _format_search_text(entry: TerminologyEntry) -> str:
+        """Build embedding text for a terminology entry.
 
         Format::
 
-            # Metric: name(data_source.analysis_field)
-            Business Definition: business_definition
-            Calculation: calculation_logic
+            # {term_text}[/{synonym1}/{synonym2}...]
+            business_definition:{business_definition}
+
+        Example::
+
+            # 基金收益率/基金经理收益
+            business_definition:衡量基金经理收益的指标
         """
-        lines = [f"# Metric: {metric.name}({metric.data_source}.{metric.analysis_field})"]
-        if metric.business_definition:
-            lines.append(f"Business Definition: {metric.business_definition}")
-        if metric.calculation_logic:
-            lines.append(f"Calculation: {metric.calculation_logic}")
-        return "\n".join(lines)
+        header = f"# {entry.term_text}"
+        if entry.synonyms:
+            header += "/" + "/".join(entry.synonyms)
+        parts = [header]
+        if entry.business_definition:
+            parts.append(f"{entry.business_definition}")
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # Row conversion
     # ------------------------------------------------------------------
 
-    def _row_to_metric(self, row: dict) -> Metric:
-        return Metric(
+    @staticmethod
+    def _row_to_entry(row: dict) -> TerminologyEntry:
+        import json
+
+        synonyms = row.get("synonyms_json")
+        if isinstance(synonyms, str):
+            synonyms = json.loads(synonyms) if synonyms else []
+        elif synonyms is None:
+            synonyms = []
+
+        return TerminologyEntry(
             id=row["id"],
-            name=row["name"],
+            term_text=row["term_text"],
+            target_type=row["target_type"],
+            target_id=row["target_id"],
             business_definition=row.get("business_definition") or None,
-            calculation_logic=row.get("calculation_logic") or None,
-            data_source=row.get("data_source", ""),
-            analysis_field=row.get("analysis_field", ""),
-            description=row.get("description") or None,
-            created_by=row.get("created_by") or None,
+            synonyms=synonyms,
+            source=row.get("source", "manual"),
             created_at=row.get("created_at") or datetime.now(),
-            updated_at=row.get("updated_at") or datetime.now(),
         )
 
     # ------------------------------------------------------------------
-    # MetricStore interface
+    # TerminologyStore interface
     # ------------------------------------------------------------------
 
-    async def create_metric(
-        self, metric: Metric, context: ToolContext
-    ) -> Metric:
+    async def create_entry(
+        self, entry: TerminologyEntry, context: ToolContext
+    ) -> TerminologyEntry:
         def _create():
-            metric.updated_at = datetime.now()
-            if metric.created_at is None:
-                metric.created_at = metric.updated_at
-            search_text = self._format_search_text(metric)
+            import json
+
+            search_text = self._format_search_text(entry)
             embedding = self._embedding_helper.encode(search_text)
 
             conn = self._get_conn()
@@ -267,47 +271,43 @@ class PostgresMetricStore(MetricStore):
                     cur.execute(
                         f"""
                         INSERT INTO {self._table}
-                            (id, name, business_definition,
-                             calculation_logic, data_source, analysis_field,
-                             description, created_by, created_at, updated_at,
-                             embedding, search_text)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            (id, term_text, target_type, target_id,
+                             business_definition, synonyms_json, source,
+                             created_at, embedding, search_text)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
-                            name = EXCLUDED.name,
+                            term_text = EXCLUDED.term_text,
+                            target_type = EXCLUDED.target_type,
+                            target_id = EXCLUDED.target_id,
                             business_definition = EXCLUDED.business_definition,
-                            calculation_logic = EXCLUDED.calculation_logic,
-                            data_source = EXCLUDED.data_source,
-                            analysis_field = EXCLUDED.analysis_field,
-                            description = EXCLUDED.description,
-                            updated_at = EXCLUDED.updated_at,
+                            synonyms_json = EXCLUDED.synonyms_json,
+                            source = EXCLUDED.source,
                             embedding = EXCLUDED.embedding,
                             search_text = EXCLUDED.search_text
                         """,
                         [
-                            metric.id,
-                            metric.name,
-                            metric.business_definition or "",
-                            metric.calculation_logic or "",
-                            metric.data_source,
-                            metric.analysis_field,
-                            metric.description or "",
-                            metric.created_by or "",
-                            metric.created_at.isoformat() if metric.created_at else datetime.now().isoformat(),
-                            metric.updated_at.isoformat() if metric.updated_at else datetime.now().isoformat(),
+                            entry.id,
+                            entry.term_text,
+                            entry.target_type,
+                            entry.target_id,
+                            entry.business_definition or "",
+                            json.dumps(entry.synonyms, ensure_ascii=False),
+                            entry.source,
+                            entry.created_at.isoformat() if entry.created_at else datetime.now().isoformat(),
                             embedding,
                             search_text,
                         ],
                     )
                 conn.commit()
-                return metric
+                return entry
             finally:
                 conn.close()
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _create)
 
-    async def get_metric(
-        self, metric_id: str, context: ToolContext
-    ) -> Optional[Metric]:
+    async def get_entry(
+        self, entry_id: str, context: ToolContext
+    ) -> Optional[TerminologyEntry]:
         def _get():
             conn = self._get_conn()
             try:
@@ -315,44 +315,44 @@ class PostgresMetricStore(MetricStore):
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT * FROM {self._table} WHERE id = %s",
-                        [metric_id],
+                        [entry_id],
                     )
                     row = cur.fetchone()
                     if row is None:
                         return None
                     cols = [desc[0] for desc in cur.description]
-                    return self._row_to_metric(dict(zip(cols, row)))
+                    return self._row_to_entry(dict(zip(cols, row)))
             finally:
                 conn.close()
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _get)
 
-    async def update_metric(
-        self, metric: Metric, context: ToolContext
+    async def update_entry(
+        self, entry: TerminologyEntry, context: ToolContext
     ) -> bool:
-        def _update():
-            metric.updated_at = datetime.now()
+        def _check():
             conn = self._get_conn()
             try:
                 self._ensure_table(conn)
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT id FROM {self._table} WHERE id = %s",
-                        [metric.id],
+                        [entry.id],
                     )
-                    if cur.fetchone() is None:
-                        return False
-                # Re-use create logic (upsert)
-                return True
+                    return cur.fetchone() is not None
             finally:
                 conn.close()
 
-        # Use create_metric's upsert logic
-        await self.create_metric(metric, context)
+        exists = await asyncio.get_event_loop().run_in_executor(self._executor, _check)
+        if not exists:
+            return False
+        # Mark as manual when user explicitly updates
+        entry.source = "manual"
+        await self.create_entry(entry, context)
         return True
 
-    async def delete_metric(
-        self, metric_id: str, context: ToolContext
+    async def delete_entry(
+        self, entry_id: str, context: ToolContext
     ) -> bool:
         def _delete():
             conn = self._get_conn()
@@ -361,7 +361,7 @@ class PostgresMetricStore(MetricStore):
                 with conn.cursor() as cur:
                     cur.execute(
                         f"DELETE FROM {self._table} WHERE id = %s",
-                        [metric_id],
+                        [entry_id],
                     )
                     deleted = cur.rowcount
                 conn.commit()
@@ -371,34 +371,40 @@ class PostgresMetricStore(MetricStore):
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _delete)
 
-    async def list_metrics(
-        self, context: ToolContext
-    ) -> List[Metric]:
+    async def list_entries(
+        self, context: ToolContext, *, source: Optional[str] = None
+    ) -> List[TerminologyEntry]:
         def _list():
             conn = self._get_conn()
             try:
                 self._ensure_table(conn)
                 with conn.cursor() as cur:
-                    cur.execute(
-                        f"SELECT * FROM {self._table} ORDER BY updated_at DESC"
-                    )
+                    if source:
+                        cur.execute(
+                            f"SELECT * FROM {self._table} "
+                            f"WHERE source = %s ORDER BY created_at DESC",
+                            [source],
+                        )
+                    else:
+                        cur.execute(
+                            f"SELECT * FROM {self._table} ORDER BY created_at DESC"
+                        )
                     cols = [desc[0] for desc in cur.description]
-                    return [self._row_to_metric(dict(zip(cols, r))) for r in cur.fetchall()]
+                    return [self._row_to_entry(dict(zip(cols, r))) for r in cur.fetchall()]
             finally:
                 conn.close()
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _list)
 
-    async def search_metrics(
+    async def search_terminology(
         self,
         query: str,
         context: ToolContext,
         *,
         limit: int = 10,
-    ) -> List[MetricSearchResult]:
+    ) -> List[TerminologySearchResult]:
         def _search():
             query_embedding = self._embedding_helper.encode(query)
-
             conn = self._get_conn()
             try:
                 self._ensure_table(conn)
@@ -411,10 +417,12 @@ class PostgresMetricStore(MetricStore):
                     cleaned = re.sub(r"#\s*\w+:\s*", "", query)
                     tokens = re.findall(r"[\w一-鿿]+", cleaned)
                     ts_query = (
-                        " & ".join([f"{t}:*" for t in tokens])
+                        " | ".join([f"{t}:*" for t in tokens])
                         if tokens
                         else query
                     )
+                    params = [query_embedding, ts_query, ts_query, limit * CE_CANDIDATE_MULTIPLIER]
+
                     cur.execute(
                         f"""
                         WITH
@@ -442,13 +450,13 @@ class PostgresMetricStore(MetricStore):
                             FROM vector_ranked v
                             FULL OUTER JOIN text_ranked t ON v.id = t.id
                         )
-                        SELECT m.*, r.rrf_score
-                        FROM {self._table} m
-                        JOIN rrf r ON m.id = r.id
+                        SELECT e.*, r.rrf_score
+                        FROM {self._table} e
+                        JOIN rrf r ON e.id = r.id
                         ORDER BY r.rrf_score DESC
                         LIMIT %s
                         """,
-                        [query_embedding, ts_query, ts_query, limit * CE_CANDIDATE_MULTIPLIER],
+                        params,
                     )
                     cols = [desc[0] for desc in cur.description]
                     rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -456,12 +464,12 @@ class PostgresMetricStore(MetricStore):
                 if not rows:
                     return []
 
-                # Optional Cross-Encoder re-rank
                 if self._cross_encoder and len(rows) > limit:
                     docs = [row.get("search_text", "") for row in rows]
                     ce_scored = self._cross_encoder.rerank_with_scores(
                         query=query, documents=docs, top_n=limit * CE_CANDIDATE_MULTIPLIER
                     )
+                    # Attach CE scores and reorder by CE rank
                     for orig_idx, ce_score in ce_scored:
                         if orig_idx < len(rows):
                             rows[orig_idx]["_ce_score"] = ce_score
@@ -471,10 +479,10 @@ class PostgresMetricStore(MetricStore):
 
                 results = []
                 for r in rows:
-                    metric = self._row_to_metric(r)
+                    entry = self._row_to_entry(r)
                     results.append(
-                        MetricSearchResult(
-                            metric=metric,
+                        TerminologySearchResult(
+                            entry=entry,
                             similarity_score=round(
                                 r.get("_ce_score", r.get("rrf_score", 0.0)), 6
                             ),
@@ -487,22 +495,90 @@ class PostgresMetricStore(MetricStore):
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _search)
 
-    async def get_metrics_by_table(
-        self, table_name: str, context: ToolContext
-    ) -> List[Metric]:
-        def _filter():
+    async def get_terms_by_target(
+        self,
+        target_type: str,
+        target_id: str,
+        context: ToolContext,
+    ) -> List[TerminologyEntry]:
+        def _get():
             conn = self._get_conn()
             try:
                 self._ensure_table(conn)
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT * FROM {self._table} "
-                        f"WHERE data_source = %s ORDER BY updated_at DESC",
-                        [table_name],
+                        f"WHERE target_type = %s AND target_id = %s "
+                        f"ORDER BY created_at DESC",
+                        [target_type, target_id],
                     )
                     cols = [desc[0] for desc in cur.description]
-                    return [self._row_to_metric(dict(zip(cols, r))) for r in cur.fetchall()]
+                    return [self._row_to_entry(dict(zip(cols, r))) for r in cur.fetchall()]
             finally:
                 conn.close()
 
-        return await asyncio.get_event_loop().run_in_executor(self._executor, _filter)
+        return await asyncio.get_event_loop().run_in_executor(self._executor, _get)
+
+    async def sync_auto_terms(
+        self,
+        context: ToolContext,
+        metrics: Optional[List] = None,
+        dimensions: Optional[List] = None,
+    ) -> int:
+        """Generate auto terminology entries from metric and dimension names.
+
+        - For metrics: term_text = metric name, target_type = 'metric'
+        - For dimensions: term_text = "{dim_name}({metric_name})", target_type = 'dimension'
+        """
+        count = 0
+
+        # Fetch metrics if not provided
+        if metrics is None and self._metric_store:
+            metrics = await self._metric_store.list_metrics(context)
+        metrics = metrics or []
+
+        # Fetch dimensions if not provided
+        if dimensions is None and self._dimension_store:
+            dimensions = await self._dimension_store.list_dimensions(context)
+        dimensions = dimensions or []
+
+        # Build metric name lookup
+        metric_names: dict[str, str] = {m.id: m.name for m in metrics}
+
+        # Generate auto entries for metrics
+        for m in metrics:
+            entry = TerminologyEntry(
+                id=f"term_auto_metric_{m.id}",
+                term_text=m.name,
+                target_type="metric",
+                target_id=m.id,
+                business_definition=m.business_definition,
+                synonyms=[],
+                source="auto",
+            )
+            await self.create_entry(entry, context)
+            count += 1
+
+        # Generate auto entries for dimensions
+        for d in dimensions:
+            metric_name = metric_names.get(d.metric_id, d.metric_id)
+            # Combine business_definition and value_range
+            biz_parts = []
+            if d.business_definition:
+                biz_parts.append(d.business_definition)
+            if d.value_range:
+                biz_parts.append(d.value_range)
+            biz_def = " | ".join(biz_parts) if biz_parts else None
+            entry = TerminologyEntry(
+                id=f"term_auto_dim_{d.id}",
+                term_text=f"{d.name}({metric_name})",
+                target_type="dimension",
+                target_id=d.id,
+                business_definition=biz_def,
+                synonyms=[],
+                source="auto",
+            )
+            await self.create_entry(entry, context)
+            count += 1
+
+        return count

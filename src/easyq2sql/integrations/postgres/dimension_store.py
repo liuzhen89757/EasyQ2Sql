@@ -1,22 +1,22 @@
 """
-PostgreSQL + pgvector implementation of MetricStore.
+PostgreSQL + pgvector implementation of DimensionStore.
 
-Single-table design. Each metric is stored as one row with its own
-embedding for vector search. Dimensions are managed independently by
-``PostgresDimensionStore``.
+Single-table design. Each dimension is stored as one row with its own
+embedding for vector search.
 """
 
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Optional
 
-from easyq2sql.capabilities.metric_store import (
-    JoinClause,
-    Metric,
-    MetricSearchResult,
-    MetricStore,
+from easyq2sql.capabilities.dimension_store import (
+    Dimension,
+    DimensionSearchResult,
+    DimensionStore,
 )
+from easyq2sql.capabilities.metric_store import JoinClause
 from easyq2sql.core.search import CrossEncoderReranker
 from easyq2sql.core.tool import ToolContext
 
@@ -24,32 +24,30 @@ from .config import (
     CE_CANDIDATE_MULTIPLIER,
     DEFAULT_CROSS_ENCODER_MODEL,
     DEFAULT_EMBEDDING_MODEL,
-    DEFAULT_METRIC_STORE_TABLE,
+    DEFAULT_DIMENSION_TABLE
 )
 from .embedding import EmbeddingHelper
 
 
-class PostgresMetricStore(MetricStore):
-    """PostgreSQL + pgvector MetricStore — single-table design.
+class PostgresDimensionStore(DimensionStore):
+    """PostgreSQL + pgvector DimensionStore.
 
-    **metric_definitions**::
+    **dimension_definitions**::
 
         id                  TEXT PRIMARY KEY
+        metric_id           TEXT NOT NULL
         name                TEXT NOT NULL
         business_definition TEXT DEFAULT ''
-        calculation_logic   TEXT DEFAULT ''
+        value_range         TEXT DEFAULT ''
         data_source         TEXT DEFAULT ''
-        analysis_field      TEXT DEFAULT ''
+        field_ref           TEXT DEFAULT ''
+        joins_json          JSONB DEFAULT '[]'
         description         TEXT DEFAULT ''
-        created_by          TEXT DEFAULT ''
         created_at          TIMESTAMP
         updated_at          TIMESTAMP
         embedding           vector(N)
         search_text         TEXT
         search_tsv          tsvector GENERATED ALWAYS
-
-    Search uses hybrid retrieval (vector + keyword with RRF fusion)
-    followed by optional Cross-Encoder re-rank.
     """
 
     DDL = """
@@ -57,18 +55,21 @@ class PostgresMetricStore(MetricStore):
 
     CREATE TABLE IF NOT EXISTS {table} (
         id TEXT PRIMARY KEY,
+        metric_id TEXT NOT NULL,
         name TEXT NOT NULL,
         business_definition TEXT DEFAULT '',
-        calculation_logic TEXT DEFAULT '',
+        value_range TEXT DEFAULT '',
         data_source TEXT DEFAULT '',
-        analysis_field TEXT DEFAULT '',
+        field_ref TEXT DEFAULT '',
+        joins_json JSONB DEFAULT '[]',
         description TEXT DEFAULT '',
-        created_by TEXT DEFAULT '',
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW(),
         embedding vector({vector_dim}),
         search_text TEXT DEFAULT ''
     );
+
+    CREATE INDEX IF NOT EXISTS {table}_metric_id_idx ON {table} (metric_id);
 
     CREATE INDEX IF NOT EXISTS {table}_embedding_idx
         ON {table} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
@@ -88,12 +89,10 @@ class PostgresMetricStore(MetricStore):
         database: Optional[str] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
-        table_name: str = DEFAULT_METRIC_STORE_TABLE,
+        table_name: str = DEFAULT_DIMENSION_TABLE,
         embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         cross_encoder_model: Optional[str] = DEFAULT_CROSS_ENCODER_MODEL,
         device: Optional[str] = None,
-        terminology_store=None,
-        dimension_store=None,
     ):
         if connection_string:
             self._conn_string = connection_string
@@ -119,8 +118,6 @@ class PostgresMetricStore(MetricStore):
             if cross_encoder_model
             else None
         )
-        self._terminology_store = terminology_store
-        self._dimension_store = dimension_store
         self._executor.submit(self._embedding_helper._get_model)
 
     # ------------------------------------------------------------------
@@ -153,7 +150,6 @@ class PostgresMetricStore(MetricStore):
         return conn
 
     def _ensure_table(self, conn):
-        """Create table and auto-migrate embedding dimension if model changed."""
         import hashlib
         import re
 
@@ -212,52 +208,68 @@ class PostgresMetricStore(MetricStore):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _format_search_text(metric: Metric) -> str:
-        """Build embedding text for a metric.
+    def _format_search_text(
+        dim: Dimension, metric_name: str = ""
+    ) -> str:
+        """Build embedding text for a dimension.
 
         Format::
 
-            # Metric: name(data_source.analysis_field)
-            Business Definition: business_definition
-            Calculation: calculation_logic
+            # Dimension: name(field_ref)
+            Business Definition: bizDef
+            Metric: metric_name(metric_id)
+            Value Range: value_range
         """
-        lines = [f"# Metric: {metric.name}({metric.data_source}.{metric.analysis_field})"]
-        if metric.business_definition:
-            lines.append(f"Business Definition: {metric.business_definition}")
-        if metric.calculation_logic:
-            lines.append(f"Calculation: {metric.calculation_logic}")
+        lines = [f"# Dimension: {dim.name}({dim.field_ref})"]
+        if dim.business_definition:
+            lines.append(f"Business Definition: {dim.business_definition}")
+        if metric_name:
+            lines.append(f"Metric: {metric_name}({dim.metric_id})")
+        else:
+            lines.append(f"Metric ID: {dim.metric_id}")
+        if dim.value_range:
+            lines.append(f"Value Range: {dim.value_range}")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Row conversion
     # ------------------------------------------------------------------
 
-    def _row_to_metric(self, row: dict) -> Metric:
-        return Metric(
+    @staticmethod
+    def _row_to_dimension(row: dict) -> Dimension:
+        joins_data = row.get("joins_json")
+        if isinstance(joins_data, str):
+            joins_data = json.loads(joins_data) if joins_data else []
+        elif joins_data is None:
+            joins_data = []
+        joins = [JoinClause(**j) for j in joins_data]
+
+        return Dimension(
             id=row["id"],
+            metric_id=row["metric_id"],
             name=row["name"],
             business_definition=row.get("business_definition") or None,
-            calculation_logic=row.get("calculation_logic") or None,
+            value_range=row.get("value_range") or None,
             data_source=row.get("data_source", ""),
-            analysis_field=row.get("analysis_field", ""),
+            field_ref=row.get("field_ref", ""),
+            joins=joins,
             description=row.get("description") or None,
-            created_by=row.get("created_by") or None,
             created_at=row.get("created_at") or datetime.now(),
             updated_at=row.get("updated_at") or datetime.now(),
         )
 
     # ------------------------------------------------------------------
-    # MetricStore interface
+    # DimensionStore interface
     # ------------------------------------------------------------------
 
-    async def create_metric(
-        self, metric: Metric, context: ToolContext
-    ) -> Metric:
+    async def create_dimension(
+        self, dimension: Dimension, context: ToolContext
+    ) -> Dimension:
         def _create():
-            metric.updated_at = datetime.now()
-            if metric.created_at is None:
-                metric.created_at = metric.updated_at
-            search_text = self._format_search_text(metric)
+            dimension.updated_at = datetime.now()
+            if dimension.created_at is None:
+                dimension.created_at = dimension.updated_at
+            search_text = self._format_search_text(dimension)
             embedding = self._embedding_helper.encode(search_text)
 
             conn = self._get_conn()
@@ -267,47 +279,53 @@ class PostgresMetricStore(MetricStore):
                     cur.execute(
                         f"""
                         INSERT INTO {self._table}
-                            (id, name, business_definition,
-                             calculation_logic, data_source, analysis_field,
-                             description, created_by, created_at, updated_at,
-                             embedding, search_text)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            (id, metric_id, name, business_definition,
+                             value_range, data_source, field_ref,
+                             joins_json, description,
+                             created_at, updated_at, embedding, search_text)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
+                            metric_id = EXCLUDED.metric_id,
                             name = EXCLUDED.name,
                             business_definition = EXCLUDED.business_definition,
-                            calculation_logic = EXCLUDED.calculation_logic,
+                            value_range = EXCLUDED.value_range,
                             data_source = EXCLUDED.data_source,
-                            analysis_field = EXCLUDED.analysis_field,
+                            field_ref = EXCLUDED.field_ref,
+                            joins_json = EXCLUDED.joins_json,
                             description = EXCLUDED.description,
                             updated_at = EXCLUDED.updated_at,
                             embedding = EXCLUDED.embedding,
                             search_text = EXCLUDED.search_text
                         """,
                         [
-                            metric.id,
-                            metric.name,
-                            metric.business_definition or "",
-                            metric.calculation_logic or "",
-                            metric.data_source,
-                            metric.analysis_field,
-                            metric.description or "",
-                            metric.created_by or "",
-                            metric.created_at.isoformat() if metric.created_at else datetime.now().isoformat(),
-                            metric.updated_at.isoformat() if metric.updated_at else datetime.now().isoformat(),
+                            dimension.id,
+                            dimension.metric_id,
+                            dimension.name,
+                            dimension.business_definition or "",
+                            dimension.value_range or "",
+                            dimension.data_source,
+                            dimension.field_ref,
+                            json.dumps(
+                                [j.model_dump() for j in dimension.joins],
+                                ensure_ascii=False,
+                            ),
+                            dimension.description or "",
+                            dimension.created_at.isoformat() if dimension.created_at else datetime.now().isoformat(),
+                            dimension.updated_at.isoformat() if dimension.updated_at else datetime.now().isoformat(),
                             embedding,
                             search_text,
                         ],
                     )
                 conn.commit()
-                return metric
+                return dimension
             finally:
                 conn.close()
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _create)
 
-    async def get_metric(
-        self, metric_id: str, context: ToolContext
-    ) -> Optional[Metric]:
+    async def get_dimension(
+        self, dimension_id: str, context: ToolContext
+    ) -> Optional[Dimension]:
         def _get():
             conn = self._get_conn()
             try:
@@ -315,44 +333,42 @@ class PostgresMetricStore(MetricStore):
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT * FROM {self._table} WHERE id = %s",
-                        [metric_id],
+                        [dimension_id],
                     )
                     row = cur.fetchone()
                     if row is None:
                         return None
                     cols = [desc[0] for desc in cur.description]
-                    return self._row_to_metric(dict(zip(cols, row)))
+                    return self._row_to_dimension(dict(zip(cols, row)))
             finally:
                 conn.close()
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _get)
 
-    async def update_metric(
-        self, metric: Metric, context: ToolContext
+    async def update_dimension(
+        self, dimension: Dimension, context: ToolContext
     ) -> bool:
-        def _update():
-            metric.updated_at = datetime.now()
+        def _check():
             conn = self._get_conn()
             try:
                 self._ensure_table(conn)
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT id FROM {self._table} WHERE id = %s",
-                        [metric.id],
+                        [dimension.id],
                     )
-                    if cur.fetchone() is None:
-                        return False
-                # Re-use create logic (upsert)
-                return True
+                    return cur.fetchone() is not None
             finally:
                 conn.close()
 
-        # Use create_metric's upsert logic
-        await self.create_metric(metric, context)
+        exists = await asyncio.get_event_loop().run_in_executor(self._executor, _check)
+        if not exists:
+            return False
+        await self.create_dimension(dimension, context)
         return True
 
-    async def delete_metric(
-        self, metric_id: str, context: ToolContext
+    async def delete_dimension(
+        self, dimension_id: str, context: ToolContext
     ) -> bool:
         def _delete():
             conn = self._get_conn()
@@ -361,7 +377,7 @@ class PostgresMetricStore(MetricStore):
                 with conn.cursor() as cur:
                     cur.execute(
                         f"DELETE FROM {self._table} WHERE id = %s",
-                        [metric_id],
+                        [dimension_id],
                     )
                     deleted = cur.rowcount
                 conn.commit()
@@ -371,33 +387,38 @@ class PostgresMetricStore(MetricStore):
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _delete)
 
-    async def list_metrics(
+    async def list_dimensions(
         self, context: ToolContext
-    ) -> List[Metric]:
+    ) -> List[Dimension]:
         def _list():
             conn = self._get_conn()
             try:
                 self._ensure_table(conn)
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"SELECT * FROM {self._table} ORDER BY updated_at DESC"
+                        f"SELECT * FROM {self._table} ORDER BY metric_id, id"
                     )
                     cols = [desc[0] for desc in cur.description]
-                    return [self._row_to_metric(dict(zip(cols, r))) for r in cur.fetchall()]
+                    return [self._row_to_dimension(dict(zip(cols, r))) for r in cur.fetchall()]
             finally:
                 conn.close()
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _list)
 
-    async def search_metrics(
+    async def search_dimensions(
         self,
         query: str,
         context: ToolContext,
         *,
         limit: int = 10,
-    ) -> List[MetricSearchResult]:
+    ) -> List[DimensionSearchResult]:
         def _search():
             query_embedding = self._embedding_helper.encode(query)
+            fetch_limit = (
+                limit * CE_CANDIDATE_MULTIPLIER
+                if self._cross_encoder
+                else limit * 3
+            )
 
             conn = self._get_conn()
             try:
@@ -442,13 +463,13 @@ class PostgresMetricStore(MetricStore):
                             FROM vector_ranked v
                             FULL OUTER JOIN text_ranked t ON v.id = t.id
                         )
-                        SELECT m.*, r.rrf_score
-                        FROM {self._table} m
-                        JOIN rrf r ON m.id = r.id
+                        SELECT d.*, r.rrf_score
+                        FROM {self._table} d
+                        JOIN rrf r ON d.id = r.id
                         ORDER BY r.rrf_score DESC
                         LIMIT %s
                         """,
-                        [query_embedding, ts_query, ts_query, limit * CE_CANDIDATE_MULTIPLIER],
+                        [query_embedding, ts_query, ts_query, fetch_limit],
                     )
                     cols = [desc[0] for desc in cur.description]
                     rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -456,11 +477,10 @@ class PostgresMetricStore(MetricStore):
                 if not rows:
                     return []
 
-                # Optional Cross-Encoder re-rank
                 if self._cross_encoder and len(rows) > limit:
                     docs = [row.get("search_text", "") for row in rows]
                     ce_scored = self._cross_encoder.rerank_with_scores(
-                        query=query, documents=docs, top_n=limit * CE_CANDIDATE_MULTIPLIER
+                        query=query, documents=docs, top_n=limit * 3
                     )
                     for orig_idx, ce_score in ce_scored:
                         if orig_idx < len(rows):
@@ -471,10 +491,10 @@ class PostgresMetricStore(MetricStore):
 
                 results = []
                 for r in rows:
-                    metric = self._row_to_metric(r)
+                    dim = self._row_to_dimension(r)
                     results.append(
-                        MetricSearchResult(
-                            metric=metric,
+                        DimensionSearchResult(
+                            dimension=dim,
                             similarity_score=round(
                                 r.get("_ce_score", r.get("rrf_score", 0.0)), 6
                             ),
@@ -487,22 +507,22 @@ class PostgresMetricStore(MetricStore):
 
         return await asyncio.get_event_loop().run_in_executor(self._executor, _search)
 
-    async def get_metrics_by_table(
-        self, table_name: str, context: ToolContext
-    ) -> List[Metric]:
-        def _filter():
+    async def get_dimensions_by_metric(
+        self, metric_id: str, context: ToolContext
+    ) -> List[Dimension]:
+        def _get():
             conn = self._get_conn()
             try:
                 self._ensure_table(conn)
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT * FROM {self._table} "
-                        f"WHERE data_source = %s ORDER BY updated_at DESC",
-                        [table_name],
+                        f"WHERE metric_id = %s ORDER BY id",
+                        [metric_id],
                     )
                     cols = [desc[0] for desc in cur.description]
-                    return [self._row_to_metric(dict(zip(cols, r))) for r in cur.fetchall()]
+                    return [self._row_to_dimension(dict(zip(cols, r))) for r in cur.fetchall()]
             finally:
                 conn.close()
 
-        return await asyncio.get_event_loop().run_in_executor(self._executor, _filter)
+        return await asyncio.get_event_loop().run_in_executor(self._executor, _get)

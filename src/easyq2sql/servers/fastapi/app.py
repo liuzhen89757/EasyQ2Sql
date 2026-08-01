@@ -87,11 +87,32 @@ class EasyQ2SqlFastAPIServer:
         # Register metric management routes (always register; routes return
         # 503 when metric_store is not configured)
         metric_store = self.config.get("metric_store")
+        dimension_store = self.config.get("dimension_store")
+        terminology_store = self.config.get("terminology_store")
         from .metric_routes import register_metric_routes
 
         register_metric_routes(
             app, self.agent, metric_store,
             schema_store=schema_store,
+            config=self.config,
+            terminology_store=terminology_store,
+            dimension_store=dimension_store,
+        )
+
+        # Register dimension management routes
+        from .dimension_routes import register_dimension_routes
+
+        register_dimension_routes(
+            app, self.agent, dimension_store,
+            config=self.config,
+            terminology_store=terminology_store,
+        )
+
+        # Register terminology management routes
+        from .terminology_routes import register_terminology_routes
+
+        register_terminology_routes(
+            app, self.agent, terminology_store,
             config=self.config,
         )
 

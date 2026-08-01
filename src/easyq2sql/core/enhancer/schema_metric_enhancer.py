@@ -147,28 +147,21 @@ class SchemaMetricContextEnhancer(LlmContextEnhancer):
                     for r in metric_results:
                         m = r.metric
                         lines.append(f"### Metric: {m.name} (id: {m.id})")
-                        if m.description:
+                        if m.business_definition:
+                            lines.append(f"Business Definition: {m.business_definition}")
+                        elif m.description:
                             lines.append(f"Description: {m.description}")
-                        lines.append(f"Analysis: {m.analysis_field}")
-                        if m.dimensions:
-                            for d in m.dimensions:
-                                d_line = f"  - {d.name} ({d.field_ref})"
-                                if d.joins:
-                                    joins = ", ".join(
-                                        f"{j.source_table}.{j.source_column} = {j.target_table}.{j.target_column}"
-                                        for j in d.joins
-                                    )
-                                    d_line += f" [Joins: {joins}]"
-                                lines.append(d_line)
-                        if m.generated_sql_template:
-                            lines.append(f"SQL Template: {m.generated_sql_template}")
+                        lines.append(f"Source: {m.data_source}")
+                        lines.append(f"Analysis Field: {m.analysis_field}")
+                        if m.calculation_logic:
+                            lines.append(f"Calculation: {m.calculation_logic}")
                         lines.append("")
 
                         # Add usage hint
                         lines.append(
-                            "**Usage**: You can execute this metric with the "
-                            f"`execute_metric` tool using metric_id='{m.id}', "
-                            "or use its SQL template as a reference for writing queries."
+                            "**Usage**: Use `search_metrics` to get full details "
+                            f"with dimensions for metric '{m.name}' (id={m.id}), "
+                            "or `execute_metric` to run it."
                         )
                         lines.append("")
                     sections.append("\n".join(lines))

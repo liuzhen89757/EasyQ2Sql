@@ -58,8 +58,13 @@ class SearchTableSchemaTool(Tool[SearchTableSchemaArgs]):
     def description(self) -> str:
         return (
             "Retrieve relevant database table schemas for the user's question. "
-            "Call once with a keyword query covering all entities the user mentioned. "
-            "Returns table names, columns, types, primary/foreign keys, and descriptions."
+            "Returns table names, columns, types, primary/foreign keys, and descriptions. "
+            "\n\n"
+            "**When NOT to call this tool:**\n"
+            "- When search_saved_correct_tool_uses returned a usable SQL — tables are "
+            "already known, skip schema search.\n"
+            "- When search_metrics already returned data_source and analysis_field — "
+            "skip schema search.\n"
         )
 
     def get_args_schema(self) -> Type[SearchTableSchemaArgs]:
@@ -89,36 +94,21 @@ class SearchTableSchemaTool(Tool[SearchTableSchemaArgs]):
                     ),
                 )
 
-            # Hybrid search results already re-ranked & truncated by the store
-            docs = [r.document_text for r in results if r.document_text]
-            result_text = "\n\n".join(docs) if docs else "No matching tables found."
-
-            # Build UI card — detailed format with collapsible card
-            detailed_content = "**Retrieved schemas passed to LLM:**\n\n"
-            for i, r in enumerate(results, 1):
-                detailed_content += f"**{i}. {r.table.table_name}** (similarity: {r.similarity_score:.6f})\n"
-                if r.table.description:
-                    detailed_content += f"- **Description:** {r.table.description}\n"
-                if r.table.database_name:
-                    detailed_content += f"- **Database:** {r.table.database_name}\n"
-                # Column summary
-                col_names = [c.name for c in r.table.columns]
-                if col_names:
-                    detailed_content += f"- **Columns ({len(col_names)}):** `{'`, `'.join(col_names[:20])}`"
-                    if len(col_names) > 20:
-                        detailed_content += f" ... (+{len(col_names) - 20} more)"
-                    detailed_content += "\n"
-                if r.table.row_count_estimate:
-                    detailed_content += f"- **Est. rows:** {r.table.row_count_estimate}\n"
-                detailed_content += "\n"
+            # Build result text with similarity scores appended to first line
+            result_parts = []
+            for r in results:
+                if r.document_text:
+                    first_line, _, rest = r.document_text.partition("\n")
+                    result_parts.append(f"{first_line} [similarity: {r.similarity_score:.4f}]\n{rest}" if rest else f"{first_line} [similarity: {r.similarity_score:.4f}]")
+            result_text = "\n\n".join(result_parts) if result_parts else "No matching tables found."
 
             return ToolResult(
                 success=True,
                 result_for_llm=result_text,
                 ui_component=UiComponent(
                     rich_component=CardComponent(
-                        title=f"📋 Schema Search: {len(results)} Table(s)",
-                        content=detailed_content.strip(),
+                        title=f"📋 Schema Search · {len(results)} results",
+                        content=result_text,
                         icon="🔍",
                         status="info",
                         collapsible=True,

@@ -199,11 +199,6 @@ class OpenAILlmService(LlmService):
         if request.system_prompt:
             messages.append({"role": "system", "content": request.system_prompt})
 
-        # Add query history as a separate system message so it survives
-        # independently of any system_prompt truncation logic.
-        if request.query_history:
-            messages.append({"role": "system", "content": request.query_history})
-
         for m in request.messages:
             msg: Dict[str, Any] = {"role": m.role, "content": m.content}
             if m.role == "tool" and m.tool_call_id:

@@ -17,6 +17,7 @@ rather than loading duplicate copies into memory.
 
 from __future__ import annotations
 
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional
@@ -73,7 +74,14 @@ def _get_or_create_cross_encoder(
 
         from sentence_transformers import CrossEncoder
 
-        model = CrossEncoder(model_name, device=device)
+        from easyq2sql.integrations.postgres.config import MODEL_CACHE_DIR
+
+        os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+        model_kwargs = {"cache_dir": MODEL_CACHE_DIR}
+        try:
+            model = CrossEncoder(model_name, device=device, model_kwargs=model_kwargs, local_files_only=True)
+        except Exception:
+            model = CrossEncoder(model_name, device=device, model_kwargs=model_kwargs)
         _CE_CACHE[cache_key] = model
         return model
 

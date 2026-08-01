@@ -129,7 +129,7 @@ def main(
 
     # Set default static folder based on dev mode
     if static_folder is None:
-        static_folder = "frontend/webcomponent/static" if dev else "static"
+        static_folder = "frontends/webcomponent/static" if dev else "static"
 
     # Add CLI options to config
     server_config.update(

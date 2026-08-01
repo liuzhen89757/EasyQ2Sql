@@ -24,4 +24,4 @@ class SimpleComponent(BaseModel):
 
     def serialize_for_frontend(self) -> Dict[str, Any]:
         """Serialize simple component for API consumption."""
-        return self.model_dump()
+        return self.model_dump(mode="json")

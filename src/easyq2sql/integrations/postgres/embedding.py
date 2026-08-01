@@ -15,6 +15,7 @@ Usage::
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import Dict, Optional
 
@@ -70,7 +71,14 @@ def _get_or_create_model(
 
         from sentence_transformers import SentenceTransformer
 
-        model = SentenceTransformer(model_name, device=device)
+        from .config import MODEL_CACHE_DIR
+
+        os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+        model_kwargs = {"cache_dir": MODEL_CACHE_DIR}
+        try:
+            model = SentenceTransformer(model_name, device=device, model_kwargs=model_kwargs, local_files_only=True)
+        except Exception:
+            model = SentenceTransformer(model_name, device=device, model_kwargs=model_kwargs)
         _EMBEDDING_CACHE[cache_key] = model
         return model
 

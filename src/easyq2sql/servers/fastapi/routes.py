@@ -30,7 +30,8 @@ def register_chat_routes(
     async def index() -> str:
         """Serve the main chat interface."""
         api_base_url = config.get("api_base_url", "")
-        return get_index_html(api_base_url=api_base_url)
+        static_folder = config.get("static_folder", "static")
+        return get_index_html(api_base_url=api_base_url, static_folder=static_folder)
 
     @app.post("/api/easyq2sql/v1/chat_sse")
     async def chat_sse(

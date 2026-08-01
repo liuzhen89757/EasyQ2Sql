@@ -1332,22 +1332,6 @@ You can:
                     )
 
         # Build Query History section from conversation metadata.
-        # It is stored as a standalone field (query_history) rather than
-        # appended to system_prompt, so that downstream truncation of
-        # system_prompt does not accidentally drop historical context.
-        query_history: Optional[str] = None
-        compressed_history = conversation.metadata.get("compressed_history", [])
-        if compressed_history:
-            try:
-                from easyq2sql.core.compression import build_query_history_section
-            except ImportError:
-                build_query_history_section = None  # type: ignore[assignment]
-
-            if build_query_history_section is not None:
-                history_section = build_query_history_section(compressed_history)
-                if history_section:
-                    query_history = history_section
-
         return LlmRequest(
             messages=messages,
             tools=tool_schemas if tool_schemas else None,
@@ -1356,7 +1340,6 @@ You can:
             max_tokens=self.config.max_tokens,
             stream=self.config.stream_responses,
             system_prompt=system_prompt,
-            query_history=query_history,
         )
 
     async def _send_llm_request(self, request: LlmRequest) -> LlmResponse:

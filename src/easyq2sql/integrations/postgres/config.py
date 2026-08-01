@@ -6,6 +6,18 @@ PostgresMetricStore.  All values can be overridden via constructor
 parameters — these are just the out-of-the-box defaults.
 """
 
+import os
+
+# ---------------------------------------------------------------------------
+# Local model cache
+# ---------------------------------------------------------------------------
+
+#: Project root (4 levels up from this file: postgres -> integrations -> easyq2sql -> src -> root)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+
+#: Local cache directory for HuggingFace models. Models are downloaded here
+#: once and loaded from disk on subsequent runs — no internet needed.
+MODEL_CACHE_DIR: str = os.path.join(_PROJECT_ROOT, ".cache", "huggingface")
 
 # ---------------------------------------------------------------------------
 # Embedding / retrieval defaults
@@ -20,7 +32,7 @@ DEFAULT_CROSS_ENCODER_MODEL: str = "BAAI/bge-reranker-base"
 
 #: Multiplier for RRF candidate pool size when Cross-Encoder is enabled.
 #: RRF fetches ``limit * CE_CANDIDATE_MULTIPLIER``, CE re-ranks to ``limit``.
-CE_CANDIDATE_MULTIPLIER: int = 4
+CE_CANDIDATE_MULTIPLIER: int = 2
 
 # ---------------------------------------------------------------------------
 # Table name defaults
@@ -29,3 +41,5 @@ CE_CANDIDATE_MULTIPLIER: int = 4
 DEFAULT_AGENT_MEMORY_TABLE: str = "agent_memory"
 DEFAULT_SCHEMA_STORE_TABLE: str = "schema_store"
 DEFAULT_METRIC_STORE_TABLE: str = "metric_store"
+DEFAULT_DIMENSION_TABLE: str = "dimension_store"
+DEFAULT_TERMINOLOGY_TABLE: str = "terminology_store"

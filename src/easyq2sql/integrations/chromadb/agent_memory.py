@@ -6,6 +6,7 @@ This implementation uses ChromaDB for local vector storage of tool usage pattern
 
 import json
 import hashlib
+import os
 import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -93,10 +94,22 @@ def _get_or_create_embedding_function(
         if device is None:
             ef = embedding_functions.DefaultEmbeddingFunction()
         else:
-            ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="sentence-transformers/all-MiniLM-L6-v2",
-                device=device,
-            )
+            from easyq2sql.integrations.postgres.config import MODEL_CACHE_DIR
+
+            os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+            try:
+                ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2",
+                    device=device,
+                    model_kwargs={"cache_dir": MODEL_CACHE_DIR},
+                    local_files_only=True,
+                )
+            except Exception:
+                ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name="sentence-transformers/all-MiniLM-L6-v2",
+                    device=device,
+                    model_kwargs={"cache_dir": MODEL_CACHE_DIR},
+                )
         _EF_CACHE[cache_key] = ef
         return ef
 

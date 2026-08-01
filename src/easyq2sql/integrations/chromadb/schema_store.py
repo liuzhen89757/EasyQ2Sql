@@ -147,7 +147,8 @@ class ChromaSchemaStore(SchemaStore):
                 ref_col = col.fk_reference_column or "id"
                 extras.append(f"Maps to {col.fk_reference_table}({ref_col})")
             if col.examples:
-                extras.append(f"Examples: [{', '.join(col.examples)}]")
+                truncated = [e[:100] + "..." if len(e) > 100 else e for e in col.examples]
+                extras.append(f"Examples: [{', '.join(truncated)}]")
 
             if extras:
                 lines.append(", ".join(extras))

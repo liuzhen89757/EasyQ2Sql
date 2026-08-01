@@ -35,12 +35,6 @@ class LlmRequest(BaseModel):
     system_prompt: Optional[str] = Field(
         default=None, description="System prompt for the LLM"
     )
-    query_history: Optional[str] = Field(
-        default=None,
-        description="Compressed conversation history section. Kept separate "
-        "from system_prompt so downstream truncation of system_prompt "
-        "does not accidentally drop historical context.",
-    )
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

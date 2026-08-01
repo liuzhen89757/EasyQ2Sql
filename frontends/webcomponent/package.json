@@ -6,7 +6,7 @@
   "scripts": {
     "sync-version": "node scripts/sync-version.js",
     "dev": "vite",
-    "build": "npm run sync-version && tsc && vite build",
+    "build": "npm run sync-version && tsc && vite build && node -e \"const{cpSync,mkdirSync,readFileSync,writeFileSync}=require('fs');const{createHash}=require('crypto');const content=readFileSync('dist/easyq2sql-components.js');const hash=createHash('md5').update(content).digest('hex').slice(0,8);mkdirSync('./static',{recursive:true});cpSync('dist/easyq2sql-components.js','./static/easyq2sql-components.js');cpSync('dist/easyq2sql-components.js','../../static/easyq2sql-components.js');writeFileSync('./static/build-version.txt',hash);writeFileSync('../../static/build-version.txt',hash);console.log('Copied to static/ (v'+hash+')')\"",
     "preview": "vite preview",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
