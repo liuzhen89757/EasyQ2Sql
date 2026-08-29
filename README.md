@@ -6,12 +6,31 @@
   ![Python](https://img.shields.io/badge/python-≥3.10-blue?style=for-the-badge&logo=python)
   ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
-  <p>
-    <a href="#-quick-start">Quick Start</a> ·
-    <a href="#-core-features">Features</a> ·
-    <a href="#-architecture">Architecture</a> ·
-    <a href="#-contributing">Contributing</a>
-  </p>
+</div>
+
+<div align="center">
+  <table width="100%">
+    <tr>
+      <td align="center" width="33.33%"><a href="img/image-1.png"><img src="img/image-1.png" alt="Chat & SSE" width="100%"></a></td>
+      <td align="center" width="33.33%"><a href="img/image-2.png"><img src="img/image-2.png" alt="Schema Management" width="100%"></a></td>
+      <td align="center" width="33.33%"><a href="img/image-3.png"><img src="img/image-3.png" alt="AutomicMetric Management" width="100%"></a></td>
+    </tr>
+    <tr>
+      <td align="center"><sub>Chat & SSE</sub></td>
+      <td align="center"><sub>Schema Management</sub></td>
+      <td align="center"><sub>AutomicMetric Management</sub></td>
+    </tr>
+    <tr>
+      <td align="center" width="33.33%"><a href="img/image-4.png"><img src="img/image-4.png" alt="DerivedMetric Management" width="100%"></a></td>
+      <td align="center" width="33.33%"><a href="img/image-5.png"><img src="img/image-5.png" alt="CompositeMetric Management" width="100%"></a></td>
+      <td align="center" width="33.33%"><a href="img/image-6.png"><img src="img/image-6.png" alt="Metric Graph Extract" width="100%"></a></td>
+    </tr>
+    <tr>
+      <td align="center"><sub>DerivedMetric Management</sub></td>
+      <td align="center"><sub>CompositeMetric Management</sub></td>
+      <td align="center"><sub>Metric Graph Extract</sub></td>
+    </tr>
+  </table>
 </div>
 
 ---
