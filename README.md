@@ -47,7 +47,7 @@
 ### Installation
 
 ```bash
-git clone https://github.com/lili/easyq2sql.git
+git clone https://github.com/liuzhen89757/EasyQ2Sql.git
 cd easyq2sql
 uv sync
 cp .env.example .env
