@@ -80,6 +80,7 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "columns": [],
                         "query_type": query_type,
                         "results": [],
+                        "sql": args.sql,
                     }
                 else:
                     # Convert DataFrame to records
@@ -134,6 +135,7 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                         "query_type": query_type,
                         "results": results_data,
                         "output_file": filename,
+                        "sql": args.sql,
                     }
             else:
                 # For non-SELECT queries (INSERT, UPDATE, DELETE, etc.)
@@ -143,7 +145,7 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                     f"Query executed successfully. {rows_affected} row(s) affected."
                 )
 
-                metadata = {"rows_affected": rows_affected, "query_type": query_type}
+                metadata = {"rows_affected": rows_affected, "query_type": query_type, "sql": args.sql}
                 ui_component = UiComponent(
                     rich_component=NotificationComponent(
                         type=ComponentType.NOTIFICATION, level="success", message=result
@@ -172,5 +174,5 @@ class RunSqlTool(Tool[RunSqlToolArgs]):
                     simple_component=SimpleTextComponent(text=error_message),
                 ),
                 error=str(e),
-                metadata={"error_type": "sql_error"},
+                metadata={"error_type": "sql_error", "sql": args.sql},
             )

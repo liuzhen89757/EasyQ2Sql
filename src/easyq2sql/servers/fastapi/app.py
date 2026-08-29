@@ -17,6 +17,35 @@ from .routes import register_chat_routes
 logger = logging.getLogger(__name__)
 
 
+class _PollingAccessLogFilter(logging.Filter):
+    """Drop uvicorn access-log lines for endpoints the admin UI polls in the background.
+
+    The metric-graph admin page polls ``GET .../metric-graph/extract/status`` every
+    ~1.5s while an LLM extraction runs. At the default ``info`` log level each poll
+    emits an ``INFO`` access-log line, flooding the log without adding signal. This
+    filter suppresses those lines unless uvicorn's access logger runs at DEBUG.
+    """
+
+    _POLLING_PATHS = (
+        "/api/easyq2sql/v1/metric-graph/extract/status",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # At DEBUG keep everything (useful when debugging the poll loop itself).
+        if logging.getLogger("uvicorn.access").isEnabledFor(logging.DEBUG):
+            return True
+        message = record.getMessage()
+        return not any(path in message for path in self._POLLING_PATHS)
+
+
+def _suppress_polling_access_log() -> None:
+    """Idempotently attach the polling access-log filter to ``uvicorn.access``."""
+    access = logging.getLogger("uvicorn.access")
+    if any(isinstance(f, _PollingAccessLogFilter) for f in access.filters):
+        return
+    access.addFilter(_PollingAccessLogFilter())
+
+
 class EasyQ2SqlFastAPIServer:
     """FastAPI server factory for EasyQ2Sql."""
 
@@ -37,6 +66,9 @@ class EasyQ2SqlFastAPIServer:
         Returns:
             Configured FastAPI application
         """
+        # Keep background-polling endpoints out of the info access log.
+        _suppress_polling_access_log()
+
         # Create FastAPI app
         app_config = self.config.get("fastapi", {})
         app = FastAPI(
@@ -85,36 +117,39 @@ class EasyQ2SqlFastAPIServer:
         register_schema_routes(app, self.agent, schema_store, self.config)
 
         # Register metric management routes (always register; routes return
-        # 503 when metric_store is not configured)
-        metric_store = self.config.get("metric_store")
-        dimension_store = self.config.get("dimension_store")
-        terminology_store = self.config.get("terminology_store")
+        # 503 when atomic_metric_store is not configured)
+        atomic_metric_store = self.config.get("atomic_metric_store")
+        derived_metric_store = self.config.get("derived_metric_store")
+        composite_metric_store = self.config.get("composite_metric_store")
         from .metric_routes import register_metric_routes
 
         register_metric_routes(
-            app, self.agent, metric_store,
+            app, self.agent, atomic_metric_store,
             schema_store=schema_store,
             config=self.config,
-            terminology_store=terminology_store,
-            dimension_store=dimension_store,
+            derived_metric_store=derived_metric_store,
+        )
+
+        # Register composite metric management routes
+        from .composite_routes import register_composite_routes
+
+        register_composite_routes(
+            app, self.agent, composite_metric_store,
+            config=self.config,
         )
 
         # Register dimension management routes
         from .dimension_routes import register_dimension_routes
 
         register_dimension_routes(
-            app, self.agent, dimension_store,
-            config=self.config,
-            terminology_store=terminology_store,
-        )
-
-        # Register terminology management routes
-        from .terminology_routes import register_terminology_routes
-
-        register_terminology_routes(
-            app, self.agent, terminology_store,
+            app, self.agent, derived_metric_store,
             config=self.config,
         )
+
+        # Register metric-graph extraction / draft / import / sync routes
+        from .metric_graph_routes import register_metric_graph_routes
+
+        register_metric_graph_routes(app, self.agent, self.config)
 
         # Register conversation management routes (always register; routes return
         # 503 when conversation_store is not configured)

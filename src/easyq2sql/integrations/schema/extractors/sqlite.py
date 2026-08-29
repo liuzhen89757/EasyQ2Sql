@@ -96,6 +96,7 @@ class SqliteSchemaExtractor(SchemaExtractor):
             # Fetch up to 3 sample rows for example values
             qualified = f'"{table_name}"'
             await self._fetch_examples(sql_runner, context, qualified, columns)
+            await self._fetch_value_ranges(sql_runner, context, qualified, columns)
 
             table = TableSchema(
                 table_name=table_name,

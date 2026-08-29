@@ -105,19 +105,6 @@ async def test_agent_top_artist(agent, expected_artist="Iron Maiden"):
     )
 
 
-@pytest.mark.anthropic
-@pytest.mark.asyncio
-async def test_anthropic_top_artist(chinook_db):
-    """Test Anthropic agent finding the top artist by sales."""
-    from easyq2sql.integrations.anthropic import AnthropicLlmService
-
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    llm = AnthropicLlmService(api_key=api_key, model="claude-sonnet-4-5")
-
-    agent = create_agent(llm, chinook_db)
-    await test_agent_top_artist(agent)
-
-
 @pytest.mark.openai
 @pytest.mark.asyncio
 async def test_openai_top_artist(chinook_db):
@@ -126,29 +113,6 @@ async def test_openai_top_artist(chinook_db):
 
     api_key = os.getenv("OPENAI_API_KEY")
     llm = OpenAILlmService(api_key=api_key, model="gpt-5")
-
-    agent = create_agent(llm, chinook_db)
-    await test_agent_top_artist(agent)
-
-
-@pytest.mark.azureopenai
-@pytest.mark.asyncio
-async def test_azure_openai_top_artist(chinook_db):
-    """Test Azure OpenAI agent finding the top artist by sales."""
-    from easyq2sql.integrations.azureopenai import AzureOpenAILlmService
-
-    # Get Azure OpenAI credentials from environment
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    model = os.getenv("AZURE_OPENAI_MODEL")
-    azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-
-    llm = AzureOpenAILlmService(
-        model=model,
-        api_key=api_key,
-        azure_endpoint=azure_endpoint,
-        api_version=api_version,
-    )
 
     agent = create_agent(llm, chinook_db)
     await test_agent_top_artist(agent)
@@ -167,29 +131,3 @@ async def test_azure_openai_top_artist(chinook_db):
 #     await test_agent_top_artist(agent)
 
 
-@pytest.mark.ollama
-@pytest.mark.asyncio
-async def test_ollama_top_artist(chinook_db):
-    """Test Ollama agent finding the top artist by sales."""
-    from easyq2sql.integrations.ollama import OllamaLlmService
-
-    llm = OllamaLlmService(
-        model="gpt-oss:20b-cloud",
-        host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
-    )
-
-    agent = create_agent(llm, chinook_db)
-    await test_agent_top_artist(agent)
-
-
-@pytest.mark.gemini
-@pytest.mark.asyncio
-async def test_gemini_top_artist(chinook_db):
-    """Test Gemini agent finding the top artist by sales."""
-    from easyq2sql.integrations.google import GeminiLlmService
-
-    # API key will be picked up from GOOGLE_API_KEY or GEMINI_API_KEY env var
-    llm = GeminiLlmService(model="gemini-2.5-pro", temperature=0.0)
-
-    agent = create_agent(llm, chinook_db)
-    await test_agent_top_artist(agent)

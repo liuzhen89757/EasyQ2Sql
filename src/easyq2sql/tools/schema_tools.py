@@ -92,6 +92,11 @@ class SearchTableSchemaTool(Tool[SearchTableSchemaArgs]):
                         rich_component=RichTextComponent(content=no_result_msg),
                         simple_component=SimpleTextComponent(text=no_result_msg),
                     ),
+                    metadata={
+                        "match_count": 0,
+                        "query": args.query,
+                        "tables": [],
+                    },
                 )
 
             # Build result text with similarity scores appended to first line
@@ -117,7 +122,11 @@ class SearchTableSchemaTool(Tool[SearchTableSchemaArgs]):
                     ),
                     simple_component=SimpleTextComponent(text=result_text),
                 ),
-                metadata={"match_count": len(results)},
+                metadata={
+                    "match_count": len(results),
+                    "query": args.query,
+                    "tables": [r.table.table_name for r in results],
+                },
             )
 
         except Exception as e:

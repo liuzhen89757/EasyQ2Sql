@@ -2,7 +2,7 @@
 PostgreSQL store default configuration.
 
 Shared defaults for PostgresAgentMemory, PostgresSchemaStore, and
-PostgresMetricStore.  All values can be overridden via constructor
+PostgresAtomicMetricStore.  All values can be overridden via constructor
 parameters — these are just the out-of-the-box defaults.
 """
 
@@ -40,6 +40,6 @@ CE_CANDIDATE_MULTIPLIER: int = 2
 
 DEFAULT_AGENT_MEMORY_TABLE: str = "agent_memory"
 DEFAULT_SCHEMA_STORE_TABLE: str = "schema_store"
-DEFAULT_METRIC_STORE_TABLE: str = "metric_store"
-DEFAULT_DIMENSION_TABLE: str = "dimension_store"
-DEFAULT_TERMINOLOGY_TABLE: str = "terminology_store"
+DEFAULT_ATOMIC_METRIC_TABLE: str = "atomic_metric"
+DEFAULT_DERIVED_METRIC_TABLE: str = "derived_metric"
+DEFAULT_COMPOSITE_METRIC_TABLE: str = "composite_metric"

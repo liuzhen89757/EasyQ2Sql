@@ -1,0 +1,98 @@
+{
+    "namespace": "MetricKnowledgeGraph",
+    "entityTypes": [
+        {
+            "name": "AtomicMetric",
+            "label": "原子指标",
+            "type": "EntityType",
+            "properties": [
+                {
+                    "en_name": "metric_name",
+                    "zh_name": "指标名称",
+                    "data_type": "Text",
+                    "required": true
+                },
+                {
+                    "en_name": "description",
+                    "zh_name": "业务描述",
+                    "data_type": "Text"
+                },
+                {
+                    "en_name": "source_field",
+                    "zh_name": "来源字段",
+                    "data_type": "Text",
+                    "required": true
+                },
+                {
+                    "en_name": "agg_func",
+                    "zh_name": "计算函数",
+                    "data_type": "Text"
+                }
+            ],
+            "relations": []
+        },
+        {
+            "name": "DerivedMetric",
+            "label": "派生指标",
+            "type": "EntityType",
+            "properties": [
+                {
+                    "en_name": "metric_name",
+                    "zh_name": "指标名称",
+                    "data_type": "Text",
+                    "required": true
+                },
+                {
+                    "en_name": "description",
+                    "zh_name": "业务描述",
+                    "data_type": "Text"
+                },
+                {
+                    "en_name": "dimension_field",
+                    "zh_name": "维度字段来源",
+                    "data_type": "Text",
+                    "required": true
+                }
+            ],
+            "relations": [
+                {
+                    "en_name": "derive_from_atomic",
+                    "zh_name": "派生自原子指标",
+                    "target_entity": "AtomicMetric",
+                    "properties": []
+                }
+            ]
+        },
+        {
+            "name": "CompositeMetric",
+            "label": "复合指标",
+            "type": "EntityType",
+            "properties": [
+                {
+                    "en_name": "metric_name",
+                    "zh_name": "指标名称",
+                    "data_type": "Text",
+                    "required": true
+                },
+                {
+                    "en_name": "description",
+                    "zh_name": "业务描述",
+                    "data_type": "Text"
+                },
+                {
+                    "en_name": "comb_func",
+                    "zh_name": "组合计算",
+                    "data_type": "Text"
+                }
+            ],
+            "relations": [
+                {
+                    "en_name": "composite_operand",
+                    "zh_name": "派生指标来源",
+                    "target_entity": "DerivedMetric",
+                    "properties": []
+                }
+            ]
+        }
+    ]
+}

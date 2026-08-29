@@ -10,19 +10,19 @@ def main() -> None:
     """Run an example interactively."""
     if len(sys.argv) < 2:
         print("Available examples:")
-        print("  python -m vanna.examples mock_quickstart")
-        print("  python -m vanna.examples mock_custom_tool")
-        print("  python -m vanna.examples anthropic_quickstart")
-        print("  python -m vanna.examples openai_quickstart")
-        print("  python -m vanna.examples mock_quota_example")
-        print("  python -m vanna.examples mock_rich_components_demo")
+        print("  python -m easyq2sql.examples mock_quickstart")
+        print("  python -m easyq2sql.examples mock_custom_tool")
+        print("  python -m easyq2sql.examples anthropic_quickstart")
+        print("  python -m easyq2sql.examples openai_quickstart")
+        print("  python -m easyq2sql.examples mock_quota_example")
+        print("  python -m easyq2sql.examples mock_rich_components_demo")
         print("")
-        print("Usage: python -m vanna.examples <example_name>")
+        print("Usage: python -m easyq2sql.examples <example_name>")
         return
 
     example_name = sys.argv[1]
     try:
-        module = importlib.import_module(f"vanna.examples.{example_name}")
+        module = importlib.import_module(f"easyq2sql.examples.{example_name}")
         if hasattr(module, "run_interactive"):
             module.run_interactive()
         elif hasattr(module, "main"):

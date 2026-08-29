@@ -48,7 +48,7 @@ class OpenAILlmService(LlmService):
             from openai import OpenAI
         except Exception as e:  # pragma: no cover - import-time error surface
             raise ImportError(
-                "openai package is required. Install with: pip install 'vanna[openai]'"
+                "openai package is required. Install with: pip install 'easyq2sql[openai]'"
             ) from e
 
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5")

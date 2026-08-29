@@ -139,17 +139,26 @@ def register_schema_routes(
 
     @app.post("/api/easyq2sql/v1/schema/sync")
     async def sync_schemas(
-        database_name: str = Query(default="default"),
+        database_name: Optional[str] = Query(default=None),
     ) -> Dict[str, Any]:
         """Manually trigger DDL re-extraction and vector store sync.
 
         Requires ``schema_extractor``, ``sql_runner``, and ``schema_store``
         to be set in the server config dict.
+
+        When ``database_name`` is omitted, fall back to the configured
+        ``database_name`` so the re-sync labels tables consistently with the
+        startup extraction (instead of always using the literal "default").
         """
         _require_store(schema_store)
         context = await _get_context(agent)
         extractor = config.get("schema_extractor") if config else None
         sql_runner = config.get("sql_runner") if config else None
+
+        if database_name is None:
+            database_name = (
+                config.get("database_name", "default") if config else "default"
+            )
 
         if extractor is None:
             raise HTTPException(

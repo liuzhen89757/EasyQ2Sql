@@ -19,7 +19,7 @@ from easyq2sql.capabilities.agent_memory import (
     ToolMemory,
     ToolMemorySearchResult,
 )
-from easyq2sql.core.search import CrossEncoderReranker
+from easyq2sql.integrations.postgres.embedding import CrossEncoderReranker
 from easyq2sql.core.tool import ToolContext
 
 from .config import (
@@ -377,7 +377,7 @@ class PostgresAgentMemory(AgentMemory):
                     # Fetch extra candidates when Cross-Encoder is enabled so the
                     # second stage has enough documents to re-rank.
                     _fetch_limit = limit * CE_CANDIDATE_MULTIPLIER if self._cross_encoder else limit
-                    # Convert question to tsquery prefix-matching format (e.g. "风险" → "风险:*")
+                    # Convert question to tsquery prefix-matching format (e.g. "risk" → "risk:*")
                     ts_question = ' & '.join([f'{w}:*' for w in question.split()]) if question else question
                     cur.execute(
                         f"""
@@ -485,7 +485,7 @@ class PostgresAgentMemory(AgentMemory):
                 self._ensure_table(conn)
                 with conn.cursor() as cur:
                     # RRF hybrid search: vector + keyword
-                    # Convert query to tsquery prefix-matching format (e.g. "风险" → "风险:*")
+                    # Convert query to tsquery prefix-matching format (e.g. "risk" → "risk:*")
                     ts_query = ' & '.join([f'{w}:*' for w in query.split()]) if query else query
                     cur.execute(
                         f"""

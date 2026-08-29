@@ -17,8 +17,10 @@ from easyq2sql.capabilities.schema_store import (
     SchemaSearchResult,
     SchemaStore,
     TableSchema,
+    format_table_llm_text,
+    format_table_search_text,
 )
-from easyq2sql.core.search import CrossEncoderReranker
+from easyq2sql.integrations.postgres.embedding import CrossEncoderReranker
 from easyq2sql.core.tool import ToolContext
 
 from .config import (
@@ -249,52 +251,13 @@ class PostgresSchemaStore(SchemaStore):
 
     @staticmethod
     def _format_search_text(table: TableSchema) -> str:
-        """Build embedding-friendly text from a TableSchema.
+        """Build the compact pipe-joined retrieval text (embedding / fts / CE).
 
-        Produces a per-column breakdown format:
-            # Table: {name}
-            [
-            (col:TYPE, Primary Key, description
-            Maps to ref_table(col), Examples: [v1, v2, v3]),
-            (col:TYPE, description, Examples: [v1, v2, v3]),
-            ]
+        Delegates to the shared :func:`format_table_search_text`. The rich
+        LLM-facing breakdown lives in :func:`format_table_llm_text` and is
+        rebuilt on demand in :meth:`search_tables`.
         """
-        lines = [f"# Table: {table.table_name}"]
-        if table.description:
-            lines.append(f"Description: {table.description}")
-        lines.append("[")
-
-        for col in table.columns:
-            flags: list[str] = []
-            if col.is_primary_key:
-                flags.append("Primary Key")
-            if col.is_foreign_key:
-                flags.append("Foreign Key")
-
-            flag_str = ", ".join(flags)
-            desc = col.description or ""
-            header = f"({col.name}:{col.data_type}"
-            if flag_str:
-                header += f", {flag_str}"
-            if desc:
-                header += f", {desc}"
-            lines.append(header)
-
-            extras: list[str] = []
-            if col.is_foreign_key and col.fk_reference_table:
-                ref_col = col.fk_reference_column or "id"
-                extras.append(f"Maps to {col.fk_reference_table}({ref_col})")
-            if col.examples:
-                truncated = [e[:100] + "..." if len(e) > 100 else e for e in col.examples]
-                extras.append(f"Examples: [{', '.join(truncated)}]")
-
-            if extras:
-                lines.append(", ".join(extras))
-
-            lines[-1] += "),"
-
-        lines.append("]")
-        return "\n".join(lines)
+        return format_table_search_text(table)
 
     @staticmethod
     def _row_to_table(row: dict) -> TableSchema:
@@ -453,7 +416,7 @@ class PostgresSchemaStore(SchemaStore):
                 self._ensure_table(conn)
                 with conn.cursor() as cur:
                     # RRF hybrid search: vector (pgvector) + keyword (tsvector)
-                    # Convert query to tsquery prefix-matching format (e.g. "风险" → "风险:*")
+                    # Convert query to tsquery prefix-matching format (e.g. "risk" → "risk:*")
                     ts_query = ' | '.join([f'{w}:*' for w in query.split()]) if query else query
                     cur.execute(
                         f"""
@@ -514,12 +477,17 @@ class PostgresSchemaStore(SchemaStore):
                     for row_dict in all_rows:
                         score = row_dict.pop("_ce_score", row_dict.pop("rrf_score", 0.0))
                         if score >= 0.002:
-                            document_text = row_dict.pop("search_text", None)
+                            row_dict.pop("search_text", None)
+                            table = self._row_to_table(row_dict)
                             results.append(
                                 SchemaSearchResult(
-                                    table=self._row_to_table(row_dict),
+                                    table=table,
                                     similarity_score=round(score, 6),
-                                    document_text=document_text,
+                                    # LLM-facing rich text is rebuilt from the
+                                    # reconstructed TableSchema; the stored
+                                    # search_text column is the compact
+                                    # retrieval form, not the display form.
+                                    document_text=format_table_llm_text(table),
                                 )
                             )
                     return results

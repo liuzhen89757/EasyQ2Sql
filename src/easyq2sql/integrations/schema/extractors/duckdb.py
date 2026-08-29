@@ -120,6 +120,7 @@ class DuckdbSchemaExtractor(SchemaExtractor):
             # Fetch up to 3 sample rows for example values
             qualified = f"{schema_name}.{table_name}" if schema_name else table_name
             await self._fetch_examples(sql_runner, context, qualified, columns)
+            await self._fetch_value_ranges(sql_runner, context, qualified, columns)
 
             table = TableSchema(
                 table_name=table_name,

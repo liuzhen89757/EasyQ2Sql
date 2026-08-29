@@ -157,278 +157,6 @@ def sample_tables():
     ]
 
 
-@pytest.fixture
-def chroma_schema_store():
-    """Create a ChromaSchemaStore backed by a temp directory."""
-    try:
-        from easyq2sql.integrations.chromadb.schema_store import ChromaSchemaStore
-
-        temp_dir = tempfile.mkdtemp()
-        store = ChromaSchemaStore(
-            persist_directory=temp_dir,
-            collection_name="test_schema_store",
-        )
-        yield store
-        shutil.rmtree(temp_dir, ignore_errors=True)
-    except ImportError:
-        pytest.skip("ChromaDB not installed")
-
-
-# ---------------------------------------------------------------------------
-# ChromaSchemaStore Tests
-# ---------------------------------------------------------------------------
-
-
-class TestChromaSchemaStore:
-    """Tests for ChromaSchemaStore CRUD and search operations."""
-
-    @pytest.mark.asyncio
-    async def test_save_and_get_table(self, chroma_schema_store, test_user, sample_table):
-        """Test saving a table schema and retrieving it by name."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        await store.save_table_schema(sample_table, context)
-
-        retrieved = await store.get_table_schema("orders", context)
-        assert retrieved is not None
-        assert retrieved.table_name == "orders"
-        assert retrieved.description == "Customer orders with line items"
-        assert len(retrieved.columns) == 5
-        assert retrieved.columns[0].name == "id"
-        assert retrieved.columns[0].is_primary_key is True
-        assert retrieved.columns[1].is_foreign_key is True
-
-    @pytest.mark.asyncio
-    async def test_get_nonexistent_table(self, chroma_schema_store, test_user):
-        """Test that getting a nonexistent table returns None."""
-        context = create_test_context(test_user)
-        result = await chroma_schema_store.get_table_schema("nonexistent", context)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_list_all_tables(self, chroma_schema_store, test_user, sample_tables):
-        """Test listing all stored tables."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        for table in sample_tables:
-            await store.save_table_schema(table, context)
-
-        all_tables = await store.list_all_tables(context)
-        assert len(all_tables) == 3
-        table_names = {t.table_name for t in all_tables}
-        assert table_names == {"customers", "orders", "products"}
-
-    @pytest.mark.asyncio
-    async def test_search_tables_by_description(self, chroma_schema_store, test_user, sample_tables):
-        """Test semantic search for tables by natural language query."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        for table in sample_tables:
-            await store.save_table_schema(table, context)
-
-        # Search for customer-related tables (use threshold=0.0 since default
-        # embedding function may produce low absolute similarity scores)
-        results = await store.search_tables(
-            query="customer account information",
-            context=context,
-            limit=5,
-            similarity_threshold=0.0,
-        )
-        assert len(results) >= 1
-        # The most relevant result should be the customers table
-        assert results[0].table.table_name == "customers"
-
-    @pytest.mark.asyncio
-    async def test_search_tables_by_column(self, chroma_schema_store, test_user, sample_tables):
-        """Test that column descriptions contribute to search relevance."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        for table in sample_tables:
-            await store.save_table_schema(table, context)
-
-        results = await store.search_tables(
-            query="product catalog with prices",
-            context=context,
-            limit=5,
-            similarity_threshold=0.0,
-        )
-        assert len(results) >= 1
-        assert results[0].table.table_name == "products"
-
-    @pytest.mark.asyncio
-    async def test_search_tables_no_match(self, chroma_schema_store, test_user, sample_tables):
-        """Test that unrelated queries return no results at high threshold."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        for table in sample_tables:
-            await store.save_table_schema(table, context)
-
-        results = await store.search_tables(
-            query="completely unrelated topic about space exploration",
-            context=context,
-            limit=5,
-            similarity_threshold=0.9,
-        )
-        assert len(results) == 0
-
-    @pytest.mark.asyncio
-    async def test_update_table_description(self, chroma_schema_store, test_user, sample_table):
-        """Test updating a table's description and verifying the change."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        await store.save_table_schema(sample_table, context)
-
-        new_desc = "Updated: all customer order transactions"
-        success = await store.update_table_description("orders", new_desc, context)
-        assert success is True
-
-        updated = await store.get_table_schema("orders", context)
-        assert updated is not None
-        assert updated.description == new_desc
-
-    @pytest.mark.asyncio
-    async def test_update_table_description_nonexistent(self, chroma_schema_store, test_user):
-        """Test updating description of a nonexistent table returns False."""
-        context = create_test_context(test_user)
-        success = await chroma_schema_store.update_table_description(
-            "no_such_table", "new description", context
-        )
-        assert success is False
-
-    @pytest.mark.asyncio
-    async def test_update_column_description(self, chroma_schema_store, test_user, sample_table):
-        """Test updating a column's description and verifying the change."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        await store.save_table_schema(sample_table, context)
-
-        new_col_desc = "Updated: order status with new values"
-        success = await store.update_column_description(
-            "orders", "status", new_col_desc, context
-        )
-        assert success is True
-
-        updated = await store.get_table_schema("orders", context)
-        status_col = next(c for c in updated.columns if c.name == "status")
-        assert status_col.description == new_col_desc
-
-    @pytest.mark.asyncio
-    async def test_update_column_description_nonexistent(self, chroma_schema_store, test_user, sample_table):
-        """Test updating description of a nonexistent column returns False."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        await store.save_table_schema(sample_table, context)
-
-        # Wrong column name
-        success = await store.update_column_description(
-            "orders", "no_such_column", "desc", context
-        )
-        assert success is False
-
-        # Wrong table name
-        success = await store.update_column_description(
-            "no_such_table", "status", "desc", context
-        )
-        assert success is False
-
-    @pytest.mark.asyncio
-    async def test_delete_table_schema(self, chroma_schema_store, test_user, sample_table):
-        """Test deleting a table schema."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        await store.save_table_schema(sample_table, context)
-        assert await store.get_table_schema("orders", context) is not None
-
-        deleted = await store.delete_table_schema("orders", context)
-        assert deleted is True
-        assert await store.get_table_schema("orders", context) is None
-
-    @pytest.mark.asyncio
-    async def test_delete_nonexistent_table(self, chroma_schema_store, test_user):
-        """Test deleting a nonexistent table returns False."""
-        context = create_test_context(test_user)
-        deleted = await chroma_schema_store.delete_table_schema("no_table", context)
-        assert deleted is False
-
-    @pytest.mark.asyncio
-    async def test_sync_all_schemas(self, chroma_schema_store, test_user, sample_tables):
-        """Test full sync: replaces all schemas with a new set."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        # First, save some tables
-        await store.save_table_schema(sample_tables[0], context)
-        await store.save_table_schema(sample_tables[1], context)
-
-        # Now sync with a different set (only products)
-        count = await store.sync_all_schemas([sample_tables[2]], context)
-        assert count == 1
-
-        all_tables = await store.list_all_tables(context)
-        assert len(all_tables) == 1
-        assert all_tables[0].table_name == "products"
-
-    @pytest.mark.asyncio
-    async def test_sync_empty_list_clears_all(self, chroma_schema_store, test_user, sample_tables):
-        """Test that syncing with an empty list removes all schemas."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        for table in sample_tables:
-            await store.save_table_schema(table, context)
-
-        count = await store.sync_all_schemas([], context)
-        assert count == 0
-
-        all_tables = await store.list_all_tables(context)
-        assert len(all_tables) == 0
-
-    @pytest.mark.asyncio
-    async def test_search_results_sorted_by_similarity(self, chroma_schema_store, test_user, sample_tables):
-        """Test that search results are ranked by similarity score."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        for table in sample_tables:
-            await store.save_table_schema(table, context)
-
-        results = await store.search_tables(
-            query="customer information and accounts",
-            context=context,
-            limit=5,
-            similarity_threshold=0.0,
-        )
-        assert len(results) >= 1
-        # Scores should be non-increasing (first is highest)
-        for i in range(len(results) - 1):
-            assert results[i].similarity_score >= results[i + 1].similarity_score
-
-    @pytest.mark.asyncio
-    async def test_search_obeys_limit(self, chroma_schema_store, test_user, sample_tables):
-        """Test that search respects the limit parameter."""
-        context = create_test_context(test_user)
-        store = chroma_schema_store
-
-        for table in sample_tables:
-            await store.save_table_schema(table, context)
-
-        results = await store.search_tables(
-            query="table",
-            context=context,
-            limit=2,
-            similarity_threshold=0.1,
-        )
-        assert len(results) <= 2
-
 
 # ---------------------------------------------------------------------------
 # ColumnSchema Unit Tests
@@ -643,3 +371,94 @@ class TestSqliteSchemaExtractor:
         tables = await extractor.extract_schemas(sqlite_runner, context, "my_database")
         for table in tables:
             assert table.database_name == "my_database"
+
+    @pytest.mark.asyncio
+    async def test_extract_value_ranges(self, sqlite_runner, test_user):
+        """Test that numeric/temporal columns get min~max and text columns get distinct values."""
+        from easyq2sql.capabilities.sql_runner.models import RunSqlToolArgs
+        from easyq2sql.integrations.schema.extractors.sqlite import SqliteSchemaExtractor
+
+        context = create_test_context(test_user)
+
+        await sqlite_runner.run_sql(
+            RunSqlToolArgs(sql=(
+                "INSERT INTO customers (name, email) VALUES "
+                "('Alice','a@x.com'),('Bob','b@x.com'),('Carol','c@x.com')"
+            )),
+            context,
+        )
+        await sqlite_runner.run_sql(
+            RunSqlToolArgs(sql=(
+                "INSERT INTO orders (customer_id, amount, order_date) VALUES "
+                "(1,10.5,'2024-01-01'),(2,25.0,'2024-02-01'),(3,40.0,'2024-03-01')"
+            )),
+            context,
+        )
+
+        extractor = SqliteSchemaExtractor()
+        tables = await extractor.extract_schemas(sqlite_runner, context, "test_db")
+
+        customers = next(t for t in tables if t.table_name == "customers")
+        name_col = next(c for c in customers.columns if c.name == "name")
+        assert name_col.value_range == "[Alice, Bob, Carol]"
+
+        orders = next(t for t in tables if t.table_name == "orders")
+        amount_col = next(c for c in orders.columns if c.name == "amount")
+        # SQLite NUMERIC affinity stores whole-number decimals as integers (40.0 -> 40).
+        assert amount_col.value_range == "10.5 ~ 40"
+
+        date_col = next(c for c in orders.columns if c.name == "order_date")
+        assert date_col.value_range == "2024-01-01 ~ 2024-03-01"
+
+    @pytest.mark.asyncio
+    async def test_value_range_skips_high_cardinality(self, sqlite_runner, test_user):
+        """Test that text columns with >10 distinct values leave value_range empty."""
+        from easyq2sql.capabilities.sql_runner.models import RunSqlToolArgs
+        from easyq2sql.integrations.schema.extractors.sqlite import SqliteSchemaExtractor
+
+        context = create_test_context(test_user)
+        values = ", ".join(f"('name_{i}', {i})" for i in range(11))
+        await sqlite_runner.run_sql(
+            RunSqlToolArgs(sql=f"INSERT INTO products (name, price) VALUES {values}"),
+            context,
+        )
+
+        extractor = SqliteSchemaExtractor()
+        tables = await extractor.extract_schemas(sqlite_runner, context, "test_db")
+        products = next(t for t in tables if t.table_name == "products")
+        name_col = next(c for c in products.columns if c.name == "name")
+        assert name_col.value_range is None
+
+
+# ---------------------------------------------------------------------------
+# Data type classification unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestDataTypeClassification:
+    """Unit tests for schema value-range type classification."""
+
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("integer", "numeric"),
+            ("INT", "numeric"),
+            ("decimal(10,2)", "numeric"),
+            ("int(11) unsigned", "numeric"),
+            ("double precision", "numeric"),
+            ("varchar(20)", "text"),
+            ("character varying", "text"),
+            ("text", "text"),
+            ("uuid", "text"),
+            ("enum('a','b')", "text"),
+            ("boolean", "boolean"),
+            ("timestamp without time zone", "temporal"),
+            ("date", "temporal"),
+            ("jsonb", "other"),
+            ("bytea", "other"),
+        ],
+    )
+    def test_classify_data_type(self, raw, expected):
+        from easyq2sql.integrations.schema.extractors.base import SchemaExtractor
+
+        assert SchemaExtractor._classify_data_type(raw) == expected

@@ -15,7 +15,13 @@ from .system_prompt import DefaultSystemPromptBuilder, SystemPromptBuilder
 from .lifecycle import LifecycleHook
 from .middleware import LlmMiddleware
 from .workflow import WorkflowHandler, WorkflowResult, DefaultWorkflowHandler
-from .recovery import ErrorRecoveryStrategy, RecoveryAction, RecoveryActionType
+from .recovery import (
+    DefaultErrorRecoveryStrategy,
+    ErrorRecoveryStrategy,
+    RecoveryAction,
+    RecoveryActionType,
+    RecoveryState,
+)
 from .enricher import ToolContextEnricher
 from .enhancer import LlmContextEnhancer, DefaultLlmContextEnhancer
 from .filter import ConversationFilter
@@ -124,6 +130,8 @@ __all__ = [
     "DefaultWorkflowHandler",
     "WorkflowResult",
     "ErrorRecoveryStrategy",
+    "DefaultErrorRecoveryStrategy",
+    "RecoveryState",
     "ToolContextEnricher",
     "LlmContextEnhancer",
     "DefaultLlmContextEnhancer",

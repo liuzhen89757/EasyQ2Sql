@@ -30,3 +30,9 @@ class RecoveryAction(BaseModel):
     message: Optional[str] = Field(
         default=None, description="Message to include with action"
     )
+    switch_model: Optional[str] = Field(
+        default=None,
+        description="Optional model name to switch the LLM service to before "
+        "a retry (e.g. a fallback model after repeated 529 errors). The agent "
+        "orchestrator applies it best-effort by setting llm_service.model.",
+    )

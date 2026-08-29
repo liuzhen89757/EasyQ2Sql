@@ -19,7 +19,7 @@ def validate_pydantic_models_in_package(package_name: str) -> Dict[str, Any]:
     forward reference issues before they cause runtime errors.
 
     Args:
-        package_name: Name of the package to validate (e.g., 'vanna.core')
+        package_name: Name of the package to validate (e.g., 'easyq2sql.core')
 
     Returns:
         Dictionary with validation results

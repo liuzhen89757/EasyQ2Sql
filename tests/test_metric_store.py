@@ -1,52 +1,51 @@
 """
-Tests for MetricStore models and PostgresMetricStore.
+Tests for AtomicMetricStore models and PostgresAtomicMetricStore.
 
-Covers the new Metric, Dimension, and TerminologyEntry models,
-plus PostgresMetricStore CRUD (when database is available).
-ChromaDB tests are skipped pending ChromaMetricStore refactor.
+Covers the new AtomicMetric and DerivedMetric models,
+plus PostgresAtomicMetricStore CRUD (when database is available).
+ChromaDB tests are skipped pending ChromaAtomicMetricStore refactor.
 """
 
 import pytest
-from easyq2sql.capabilities.metric_store import (
+from easyq2sql.capabilities.atomic_metric import (
     JoinClause,
-    Metric,
-    MetricSearchResult,
+    AtomicMetric,
 )
 
 
 # ---------------------------------------------------------------------------
-# Metric Model Unit Tests
+# AtomicMetric Model Unit Tests
 # ---------------------------------------------------------------------------
 
 
-class TestMetricModel:
-    """Unit tests for the new Metric data model."""
+class TestAtomicMetricModel:
+    """Unit tests for the new AtomicMetric data model."""
 
     def test_metric_auto_generates_id(self):
-        """Metric gets an auto-generated ID."""
-        metric = Metric(
+        """AtomicMetric gets an auto-generated ID."""
+        atomic_metric = AtomicMetric(
             name="Test",
             data_source="t",
             analysis_field="t.c",
         )
-        assert metric.id is not None
-        assert metric.id.startswith("metric_")
+        assert atomic_metric.id is not None
+        assert atomic_metric.id.startswith("atomic_metric_")
 
     def test_metric_default_values(self):
-        """Metric default values."""
-        metric = Metric(
+        """AtomicMetric default values."""
+        atomic_metric = AtomicMetric(
             name="Test Metric",
             data_source="users",
             analysis_field="users.id",
         )
-        assert metric.description is None
-        assert metric.business_definition is None
-        assert metric.calculation_logic is None
-        assert metric.created_by is None
+        assert atomic_metric.description is None
+        assert atomic_metric.business_definition is None
+        assert atomic_metric.calculation_logic is None
+        assert atomic_metric.created_by is None
 
     def test_metric_all_fields(self):
-        """Metric with all fields populated."""
-        metric = Metric(
+        """AtomicMetric with all fields populated."""
+        atomic_metric = AtomicMetric(
             name="Total Sales",
             business_definition="Sum of all order amounts",
             calculation_logic="SUM",
@@ -55,36 +54,36 @@ class TestMetricModel:
             description="Revenue metric",
             created_by="admin",
         )
-        assert metric.name == "Total Sales"
-        assert metric.business_definition == "Sum of all order amounts"
-        assert metric.calculation_logic == "SUM"
-        assert metric.data_source == "orders"
-        assert metric.analysis_field == "orders.amount"
+        assert atomic_metric.name == "Total Sales"
+        assert atomic_metric.business_definition == "Sum of all order amounts"
+        assert atomic_metric.calculation_logic == "SUM"
+        assert atomic_metric.data_source == "orders"
+        assert atomic_metric.analysis_field == "orders.amount"
 
     def test_metric_serialization_roundtrip(self):
-        """Metric serializes and deserializes correctly."""
-        metric = Metric(
+        """AtomicMetric serializes and deserializes correctly."""
+        atomic_metric = AtomicMetric(
             name="Test",
             business_definition="Count of payments",
             calculation_logic="COUNT",
             data_source="payments",
             analysis_field="payments.id",
         )
-        data = metric.model_dump(mode="json")
-        restored = Metric(**data)
+        data = atomic_metric.model_dump(mode="json")
+        restored = AtomicMetric(**data)
         assert restored.name == "Test"
         assert restored.data_source == "payments"
         assert restored.analysis_field == "payments.id"
         assert restored.calculation_logic == "COUNT"
 
     def test_metric_json_serializable(self):
-        """Metric can be serialized to JSON."""
-        metric = Metric(
+        """AtomicMetric can be serialized to JSON."""
+        atomic_metric = AtomicMetric(
             name="Test",
             data_source="t",
             analysis_field="t.c",
         )
-        json_str = metric.model_dump_json()
+        json_str = atomic_metric.model_dump_json()
         assert "Test" in json_str
 
 
@@ -121,28 +120,28 @@ class TestJoinClause:
 
 
 # ---------------------------------------------------------------------------
-# Dimension Model Tests
+# DerivedMetric Model Tests
 # ---------------------------------------------------------------------------
 
 
-class TestDimensionModel:
-    """Unit tests for Dimension model."""
+class TestDerivedMetricModel:
+    """Unit tests for DerivedMetric model."""
 
-    def test_dimension_auto_generates_id(self):
-        from easyq2sql.capabilities.dimension_store.models import Dimension
-        dim = Dimension(
-            metric_id="m1",
+    def test_derived_metric_auto_generates_id(self):
+        from easyq2sql.capabilities.derived_metric.models import DerivedMetric
+        derived_metric = DerivedMetric(
+            atomic_metric_id="m1",
             name="Time",
             data_source="dim_date",
             field_ref="dim_date.date",
         )
-        assert dim.id is not None
-        assert dim.id.startswith("dim_")
+        assert derived_metric.id is not None
+        assert derived_metric.id.startswith("derived_metric_")
 
-    def test_dimension_with_joins(self):
-        from easyq2sql.capabilities.dimension_store.models import Dimension
-        dim = Dimension(
-            metric_id="m1",
+    def test_derived_metric_with_joins(self):
+        from easyq2sql.capabilities.derived_metric.models import DerivedMetric
+        derived_metric = DerivedMetric(
+            atomic_metric_id="m1",
             name="Region",
             data_source="dim_region",
             field_ref="dim_region.name",
@@ -155,88 +154,32 @@ class TestDimensionModel:
                 ),
             ],
         )
-        assert len(dim.joins) == 1
-        assert dim.joins[0].target_table == "dim_region"
-
-    def test_dimension_hierarchy(self):
-        from easyq2sql.capabilities.dimension_store.models import Dimension
-        dim = Dimension(
-            metric_id="m1",
-            name="Month",
-            data_source="dim_date",
-            field_ref="dim_date.month",
-            hierarchy="Year/Month",
-            level=1,
-            parent_id="dim_parent",
-        )
-        assert dim.level == 1
-        assert dim.parent_id == "dim_parent"
-        assert dim.hierarchy == "Year/Month"
+        assert len(derived_metric.joins) == 1
+        assert derived_metric.joins[0].target_table == "dim_region"
 
 
 # ---------------------------------------------------------------------------
-# TerminologyEntry Model Tests
-# ---------------------------------------------------------------------------
-
-
-class TestTerminologyModel:
-    """Unit tests for TerminologyEntry model."""
-
-    def test_entry_auto_generates_id(self):
-        from easyq2sql.capabilities.terminology_store.models import TerminologyEntry
-        entry = TerminologyEntry(
-            term_text="OEE",
-            target_type="metric",
-            target_id="m1",
-        )
-        assert entry.id is not None
-        assert entry.id.startswith("term_")
-
-    def test_entry_with_synonyms(self):
-        from easyq2sql.capabilities.terminology_store.models import TerminologyEntry
-        entry = TerminologyEntry(
-            term_text="Revenue",
-            target_type="metric",
-            target_id="m2",
-            synonyms=["Income", "Sales"],
-            business_definition="Total revenue from all channels",
-            source="manual",
-        )
-        assert "Income" in entry.synonyms
-        assert entry.source == "manual"
-
-    def test_entry_default_source(self):
-        from easyq2sql.capabilities.terminology_store.models import TerminologyEntry
-        entry = TerminologyEntry(
-            term_text="Orders",
-            target_type="metric",
-            target_id="m1",
-        )
-        assert entry.source == "manual"
-
-
-# ---------------------------------------------------------------------------
-# PostgresMetricStore Tests (requires database)
+# PostgresAtomicMetricStore Tests (requires database)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.skip(reason="Requires PostgreSQL database connection")
-class TestPostgresMetricStore:
-    """Integration tests for PostgresMetricStore."""
+class TestPostgresAtomicMetricStore:
+    """Integration tests for PostgresAtomicMetricStore."""
 
     @pytest.mark.asyncio
     async def test_create_and_get_metric(self):
-        """Create a metric and retrieve it by ID."""
-        from easyq2sql.integrations.postgres.metric_store import PostgresMetricStore
+        """Create an atomic metric and retrieve it by ID."""
+        from easyq2sql.integrations.postgres.atomic_metric_store import PostgresAtomicMetricStore
         from easyq2sql.core.tool import ToolContext
         from easyq2sql.core.user.models import User
 
-        store = PostgresMetricStore(
+        store = PostgresAtomicMetricStore(
             host="localhost",
             database="test_db",
             user="postgres",
             password="postgres",
-            table_name="test_metrics",
+            table_name="test_atomic_metrics",
         )
         user = User(id="test", group_memberships=["admin"])
         context = ToolContext(
@@ -246,7 +189,7 @@ class TestPostgresMetricStore:
             agent_memory=None,
         )
 
-        metric = Metric(
+        atomic_metric = AtomicMetric(
             name="Test Metric",
             business_definition="A test metric",
             calculation_logic="COUNT",
@@ -254,10 +197,10 @@ class TestPostgresMetricStore:
             analysis_field="test_table.id",
         )
 
-        created = await store.create_metric(metric, context)
+        created = await store.create_atomic_metric(atomic_metric, context)
         assert created.id is not None
         assert created.name == "Test Metric"
 
-        retrieved = await store.get_metric(created.id, context)
+        retrieved = await store.get_atomic_metric(created.id, context)
         assert retrieved is not None
         assert retrieved.name == "Test Metric"

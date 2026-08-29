@@ -21,6 +21,7 @@ class ColumnSchema(BaseModel):
     fk_reference_table: Optional[str] = None
     fk_reference_column: Optional[str] = None
     examples: Optional[List[str]] = None
+    value_range: Optional[str] = None
 
 
 class TableSchema(BaseModel):

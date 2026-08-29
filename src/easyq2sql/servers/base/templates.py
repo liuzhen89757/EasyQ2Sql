@@ -88,21 +88,8 @@ def get_index_html(
             pointer-events: none;
             z-index: 0;
             background:
-                radial-gradient(circle at top left, rgba(21, 168, 168, 0.12), transparent 60%),
-                radial-gradient(circle at bottom right, rgba(254, 93, 38, 0.08), transparent 65%);
-        }}
-
-        body::after {{
-            content: '';
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            z-index: 0;
-            background-image:
-                radial-gradient(circle at 2px 2px, rgba(2, 61, 96, 0.3) 1px, transparent 0),
-                linear-gradient(rgba(2, 61, 96, 0.1) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(2, 61, 96, 0.1) 1px, transparent 1px);
-            background-size: 32px 32px, 100px 100px, 100px 100px;
+                radial-gradient(circle at top left, rgba(21, 168, 168, 0.10), transparent 60%),
+                radial-gradient(circle at bottom right, rgba(254, 93, 38, 0.06), transparent 65%);
         }}
 
         body > * {{
@@ -112,6 +99,8 @@ def get_index_html(
 
         easyq2sql-chat {{
             width: 100%;
+            height: 100%;
+            display: block;
         }}
 
         /* Sidebar scrollbar */
@@ -123,11 +112,6 @@ def get_index_html(
         #progressBody::-webkit-scrollbar {{ width: 4px; }}
         #progressBody::-webkit-scrollbar-track {{ background: transparent; }}
         #progressBody::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 4px; }}
-
-        /* Progress panel collapsed state */
-        #progressPanel.collapsed #progressBody {{ display: none; }}
-        #progressPanel.collapsed {{ width: auto; min-width: 180px; }}
-        #progressPanel.collapsed #progressToggleIcon {{ transform: rotate(180deg); }}
 
         /* Conversation item transitions */
         .conv-item {{
@@ -155,141 +139,110 @@ def get_index_html(
     {component_script}
 </head>
 <body>
-    <div class="max-w-6xl mx-auto p-5">
+    <div class="max-w-7xl mx-auto p-5">
         <!-- Header -->
-        <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-easyq2sql-navy mb-2 font-serif">EasyQ2Sql</h1>
-            <p class="text-lg font-mono font-bold text-easyq2sql-teal mb-4">DATA-FIRST AGENTS</p>
-            <p class="text-slate-600 mb-4">Interactive AI Assistant powered by EasyQ2Sql Framework</p>
-            <div class="flex justify-center gap-3 flex-wrap">
-                <a href="javascript:window.location='view-source:'+window.location.href" class="inline-flex items-center gap-2 px-4 py-2 bg-easyq2sql-teal text-white text-sm font-medium rounded-lg hover:bg-easyq2sql-navy transition">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
-                    </svg>
-                    View Page Source
-                </a>
-                <a href="{api_base_url}/admin/schema" class="inline-flex items-center gap-2 px-4 py-2 bg-easyq2sql-navy text-white text-sm font-medium rounded-lg hover:bg-easyq2sql-teal transition">
-                    &#x1f4ca; Schema Admin
-                </a>
-                <a href="{api_base_url}/admin/metrics" class="inline-flex items-center gap-2 px-4 py-2 bg-easyq2sql-navy text-white text-sm font-medium rounded-lg hover:bg-easyq2sql-teal transition">
-                    &#x1f4c8; Metrics Admin
-                </a>
+        <header class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-easyq2sql-navy font-serif">EasyQ2Sql</h1>
+                <p class="text-sm text-slate-500 font-mono mt-1">DATA-FIRST AGENTS</p>
             </div>
-        </div>
+            <nav class="flex gap-3 flex-wrap justify-end">
+                <a href="{api_base_url}/" class="px-4 py-2 bg-easyq2sql-navy text-white text-sm rounded-lg hover:bg-easyq2sql-teal transition font-medium">Chat</a>
+                <a href="{api_base_url}/admin/schema" class="px-4 py-2 bg-easyq2sql-teal text-white text-sm rounded-lg hover:bg-easyq2sql-navy transition font-medium">Schema</a>
+                <a href="{api_base_url}/admin/atomic-metrics" class="px-4 py-2 bg-easyq2sql-teal text-white text-sm rounded-lg hover:bg-easyq2sql-navy transition font-medium">AtomicMetric</a>
+                <a href="{api_base_url}/admin/derived-metrics" class="px-4 py-2 bg-easyq2sql-teal text-white text-sm rounded-lg hover:bg-easyq2sql-navy transition font-medium">DerivedMetric</a>
+                <a href="{api_base_url}/admin/composite-metrics" class="px-4 py-2 bg-easyq2sql-teal text-white text-sm rounded-lg hover:bg-easyq2sql-navy transition font-medium">CompositeMetric</a>
+                <a href="{api_base_url}/admin/metric-graph" class="px-4 py-2 bg-easyq2sql-teal text-white text-sm rounded-lg hover:bg-easyq2sql-navy transition font-medium">Metric Graph</a>
+            </nav>
+        </header>
 
-        <!-- Login Form -->
-        <div id="loginContainer" class="max-w-md mx-auto mb-10 bg-white p-8 rounded-xl shadow-lg border border-easyq2sql-teal/30">
-            <div class="text-center mb-6">
-                <h2 class="text-2xl font-semibold text-easyq2sql-navy mb-2 font-serif">Login to Continue</h2>
-                <p class="text-sm text-slate-600">Select your email to access the chat</p>
+        <!-- Main content area -->
+        <div>
+            <!-- Login Form -->
+            <div id="loginContainer" class="max-w-md mx-auto mb-10 bg-white p-8 rounded-xl shadow-lg border border-easyq2sql-teal/30">
+                <div class="text-center mb-6">
+                    <h2 class="text-2xl font-semibold text-easyq2sql-navy mb-2 font-serif">Login to Continue</h2>
+                    <p class="text-sm text-slate-600">Select your email to access the chat</p>
+                </div>
+
+                <div class="mb-5">
+                    <label for="emailInput" class="block mb-2 text-sm font-medium text-easyq2sql-navy">Email Address</label>
+                    <select
+                        id="emailInput"
+                        class="w-full px-4 py-3 text-sm border border-easyq2sql-teal/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-easyq2sql-teal focus:border-transparent bg-white"
+                    >
+                        <option value="">Select an email...</option>
+                        <option value="admin@example.com">admin@example.com</option>
+                        <option value="user@example.com">user@example.com</option>
+                    </select>
+                </div>
+
+                <button id="loginButton" class="w-full px-4 py-3 bg-easyq2sql-teal text-white text-sm font-medium rounded-lg hover:bg-easyq2sql-navy focus:outline-none focus:ring-2 focus:ring-easyq2sql-teal focus:ring-offset-2 transition disabled:bg-gray-400 disabled:cursor-not-allowed">
+                    Continue
+                </button>
+
+                <div class="mt-5 p-3 bg-easyq2sql-teal/10 border-l-4 border-easyq2sql-teal rounded text-xs text-easyq2sql-navy leading-relaxed">
+                    <strong>Demo Mode:</strong> This is a frontend-only authentication demo.
+                    Your email will be stored as a cookie and automatically sent with all API requests.
+                </div>
             </div>
 
-            <div class="mb-5">
-                <label for="emailInput" class="block mb-2 text-sm font-medium text-easyq2sql-navy">Email Address</label>
-                <select
-                    id="emailInput"
-                    class="w-full px-4 py-3 text-sm border border-easyq2sql-teal/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-easyq2sql-teal focus:border-transparent bg-white"
-                >
-                    <option value="">Select an email...</option>
-                    <option value="admin@example.com">admin@example.com</option>
-                    <option value="user@example.com">user@example.com</option>
-                </select>
+            <!-- Logged In Status (hidden by default) -->
+            <div id="loggedInStatus" class="hidden mb-4 flex items-center justify-between bg-white rounded-lg border border-easyq2sql-teal/30 px-4 py-2">
+                <span class="text-sm text-slate-600">Logged in as <span id="loggedInEmail" class="font-semibold text-easyq2sql-navy"></span></span>
+                <button id="logoutButton" class="px-3 py-1.5 bg-easyq2sql-navy text-white text-xs rounded hover:bg-easyq2sql-teal transition">
+                    Logout
+                </button>
             </div>
 
-            <button id="loginButton" class="w-full px-4 py-3 bg-easyq2sql-teal text-white text-sm font-medium rounded-lg hover:bg-easyq2sql-navy focus:outline-none focus:ring-2 focus:ring-easyq2sql-teal focus:ring-offset-2 transition disabled:bg-gray-400 disabled:cursor-not-allowed">
-                Continue
-            </button>
-
-            <div class="mt-5 p-3 bg-easyq2sql-teal/10 border-l-4 border-easyq2sql-teal rounded text-xs text-easyq2sql-navy leading-relaxed">
-                <strong>Demo Mode:</strong> This is a frontend-only authentication demo.
-                Your email will be stored as a cookie and automatically sent with all API requests.
-            </div>
-        </div>
-
-        <!-- Logged In Status (hidden by default) -->
-        <div id="loggedInStatus" class="hidden text-center p-4 bg-easyq2sql-teal/10 border border-easyq2sql-teal/30 rounded-lg mb-5">
-            Logged in as <span id="loggedInEmail" class="font-semibold text-easyq2sql-navy"></span>
-            <br>
-            <button id="logoutButton" class="mt-2 px-3 py-1.5 bg-easyq2sql-navy text-white text-xs rounded hover:bg-easyq2sql-teal transition">
-                Logout
-            </button>
-        </div>
-
-        <!-- Chat Sections (hidden by default until login) -->
-        <div id="chatSections" class="hidden">
-            <!-- Two-column layout: sidebar + chat -->
-            <div class="flex gap-5 h-[650px] max-h-[85vh]">
-                <!-- LEFT SIDEBAR: Conversation history -->
-                <div class="conv-sidebar w-64 flex-shrink-0 bg-white rounded-xl shadow-lg border border-easyq2sql-teal/30 flex flex-col overflow-hidden">
-                    <!-- New Chat button -->
-                    <div class="p-4 border-b border-gray-100">
-                        <button id="newChatBtn" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-easyq2sql-teal text-white text-sm font-semibold rounded-lg hover:bg-easyq2sql-navy transition">
-                            <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-                                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-                            </svg>
-                            New Chat
-                        </button>
-                    </div>
-
-                    <!-- Conversation list -->
-                    <div class="flex-1 overflow-y-auto p-2" id="convList">
-                        <div class="text-xs font-semibold uppercase tracking-wider text-gray-400 px-3 py-2">Recent Conversations</div>
-                        <div id="convListContent">
-                            <div class="text-xs text-gray-400 text-center py-4">Loading...</div>
+            <!-- Chat Sections (hidden by default until login) -->
+            <div id="chatSections" class="hidden">
+                <!-- Three-column layout: sidebar + chat + progress -->
+                <div class="flex h-[650px] max-h-[85vh]">
+                    <!-- LEFT: Conversation history -->
+                    <aside class="conv-sidebar w-64 flex-shrink-0 mr-5 bg-white rounded-xl shadow-lg border border-easyq2sql-teal/30 flex flex-col overflow-hidden">
+                        <!-- New Chat button -->
+                        <div class="p-4 border-b border-gray-100">
+                            <button id="newChatBtn" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-easyq2sql-teal text-white text-sm font-semibold rounded-lg hover:bg-easyq2sql-navy transition">
+                                <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                                </svg>
+                                New Chat
+                            </button>
                         </div>
-                    </div>
 
-                    <!-- API info footer -->
-                    <div class="p-3 border-t border-gray-100 text-center">
-                        <span id="convCount" class="text-xs text-gray-400">0 conversations</span>
-                    </div>
-                </div>
+                        <!-- Conversation list -->
+                        <div class="flex-1 min-h-0 overflow-y-auto p-2" id="convList">
+                            <div class="text-xs font-semibold uppercase tracking-wider text-gray-400 px-3 py-2">Recent Conversations</div>
+                            <div id="convListContent">
+                                <div class="text-xs text-gray-400 text-center py-4">Loading...</div>
+                            </div>
+                        </div>
 
-                <!-- CENTER: Chat component -->
-                <div class="flex-1 min-w-0 bg-white rounded-xl shadow-lg h-full overflow-hidden border border-easyq2sql-teal/30">
-                    <easyq2sql-chat
-                        id="easyq2sqlChat"
-                        api-base="{api_base_url}"
-                        sse-endpoint="{api_base_url}/api/easyq2sql/v1/chat_sse"
-                        ws-endpoint="{api_base_url}/api/easyq2sql/v1/chat_websocket"
-                        poll-endpoint="{api_base_url}/api/easyq2sql/v1/chat_poll">
-                    </easyq2sql-chat>
-                </div>
-            </div>
+                        <!-- API info footer -->
+                        <div class="p-3 border-t border-gray-100 text-center">
+                            <span id="convCount" class="text-xs text-gray-400">0 conversations</span>
+                        </div>
 
-            <!-- Floating progress panel — outside layout, doesn't take space -->
-            <div id="progressPanel" class="fixed right-4 top-[220px] w-64 bg-white rounded-xl shadow-xl border border-easyq2sql-teal/30 flex flex-col overflow-hidden z-40" style="max-height: 60vh;">
-                <div class="p-3 border-b border-gray-100 flex items-center justify-between cursor-pointer" id="toggleProgressBtn">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-gray-400">Execution Status</span>
-                    <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" class="text-gray-400 transition-transform" id="progressToggleIcon">
-                        <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
-                    </svg>
-                </div>
-                <div id="progressBody" class="flex-1 overflow-y-auto">
-                    <easyq2sql-progress-tracker theme="light"></easyq2sql-progress-tracker>
-                </div>
-            </div>
+                        <!-- Execution status (below conversation history) -->
+                        <div id="progressPanel" class="flex-shrink-0 border-t border-gray-100">
+                            <div id="progressBody" class="max-h-64 overflow-y-auto">
+                                <easyq2sql-progress-tracker theme="light"></easyq2sql-progress-tracker>
+                            </div>
+                        </div>
+                    </aside>
 
-            <!-- API Endpoints reference -->
-            <div class="mt-8 p-5 bg-white rounded-lg shadow border border-easyq2sql-teal/30">
-                <h3 class="text-lg font-semibold text-easyq2sql-navy mb-3 font-serif">API Endpoints</h3>
-                <ul class="space-y-2">
-                    <li class="p-2 bg-easyq2sql-cream/50 rounded font-mono text-sm">
-                        <span class="font-bold text-easyq2sql-teal mr-2">POST</span>{api_base_url}/api/easyq2sql/v1/chat_sse - Server-Sent Events streaming
-                    </li>
-                    <li class="p-2 bg-easyq2sql-cream/50 rounded font-mono text-sm">
-                        <span class="font-bold text-easyq2sql-teal mr-2">WS</span>{api_base_url}/api/easyq2sql/v1/chat_websocket - WebSocket real-time chat
-                    </li>
-                    <li class="p-2 bg-easyq2sql-cream/50 rounded font-mono text-sm">
-                        <span class="font-bold text-easyq2sql-teal mr-2">POST</span>{api_base_url}/api/easyq2sql/v1/chat_poll - Request/response polling
-                    </li>
-                    <li class="p-2 bg-easyq2sql-cream/50 rounded font-mono text-sm">
-                        <span class="font-bold text-easyq2sql-teal mr-2">GET</span>{api_base_url}/api/easyq2sql/v1/conversations - Conversation history
-                    </li>
-                    <li class="p-2 bg-easyq2sql-cream/50 rounded font-mono text-sm">
-                        <span class="font-bold text-easyq2sql-teal mr-2">GET</span>{api_base_url}/health - Health check
-                    </li>
-                </ul>
+                    <!-- CENTER: Chat component -->
+                    <main class="flex-1 min-w-0 overflow-hidden">
+                        <easyq2sql-chat
+                            id="easyq2sqlChat"
+                            api-base="{api_base_url}"
+                            sse-endpoint="{api_base_url}/api/easyq2sql/v1/chat_sse"
+                            ws-endpoint="{api_base_url}/api/easyq2sql/v1/chat_websocket"
+                            poll-endpoint="{api_base_url}/api/easyq2sql/v1/chat_poll">
+                        </easyq2sql-chat>
+                    </main>
+                </div>
             </div>
         </div>
     </div>
@@ -477,15 +430,6 @@ def get_index_html(
         function initSidebar() {{
             const chat = getChatComponent();
             if (!chat) {{ setTimeout(initSidebar, 200); return; }}
-
-            // Init progress panel collapse toggle
-            const toggleBtn = document.getElementById('toggleProgressBtn');
-            const progressPanel = document.getElementById('progressPanel');
-            if (toggleBtn && progressPanel) {{
-                toggleBtn.addEventListener('click', () => {{
-                    progressPanel.classList.toggle('collapsed');
-                }});
-            }}
 
             // Track current conversation ID from the component
             currentConversationId = chat.conversationId || '';

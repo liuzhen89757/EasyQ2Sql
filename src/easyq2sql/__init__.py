@@ -84,11 +84,11 @@ from .core import (
 
 # Import capabilities
 from .capabilities import (
+    AtomicMetric,
+    AtomicMetricSearchResult,
+    AtomicMetricStore,
     ColumnSchema,
     JoinClause,
-    Metric,
-    MetricSearchResult,
-    MetricStore,
     SchemaSearchResult,
     SchemaStore,
     TableSchema,
@@ -100,7 +100,7 @@ from .integrations import MemoryConversationStore, MockLlmService
 # Import PostgreSQL-based capability implementations
 from .integrations.postgres import (
     PostgresAgentMemory,
-    PostgresMetricStore,
+    PostgresAtomicMetricStore,
     PostgresRunner,
     PostgresSchemaStore,
 )
@@ -177,17 +177,17 @@ __all__ = [
     "ColumnSchema",
     "SchemaSearchResult",
     # Capabilities - Metric
-    "MetricStore",
-    "Metric",
+    "AtomicMetricStore",
+    "AtomicMetric",
     "JoinClause",
-    "MetricSearchResult",
+    "AtomicMetricSearchResult",
     # Basic implementations
     "MemoryConversationStore",
     "MockLlmService",
     # PostgreSQL store implementations
     "PostgresRunner",
     "PostgresSchemaStore",
-    "PostgresMetricStore",
+    "PostgresAtomicMetricStore",
     "PostgresAgentMemory",
     # Server components
     "EasyQ2SqlFlaskServer",

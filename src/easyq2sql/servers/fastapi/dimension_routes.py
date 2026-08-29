@@ -1,8 +1,8 @@
 """
-FastAPI route implementations for Dimension Management.
+FastAPI route implementations for Derived Metric Management.
 
 Registers REST API endpoints for creating, reading, updating, and
-deleting dimension definitions.
+deleting derived metric definitions.
 """
 
 from typing import Any, Dict, List, Optional
@@ -10,11 +10,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from ...capabilities.dimension_store import DimensionStore
+from ...capabilities.derived_metric import DerivedMetricStore
 
 
 class JoinClauseRequest(BaseModel):
-    """Join clause within a dimension."""
+    """Join clause within a derived metric."""
     source_table: str
     source_column: str
     target_table: str
@@ -22,16 +22,16 @@ class JoinClauseRequest(BaseModel):
     join_type: str = "INNER JOIN"
 
 
-class CreateDimensionRequest(BaseModel):
-    """Request body for creating a new dimension."""
+class CreateDerivedMetricRequest(BaseModel):
+    """Request body for creating a new derived metric."""
 
-    metric_id: str = Field(description="FK to the parent Metric")
-    name: str = Field(description="Dimension name, e.g. 'Time', 'Region'")
+    atomic_metric_id: str = Field(description="FK to the parent AtomicMetric")
+    name: str = Field(description="Derived metric name, e.g. 'Time', 'Region'")
     business_definition: Optional[str] = Field(
         default=None, description="Business meaning"
     )
     value_range: Optional[str] = Field(default=None, description="Value range")
-    data_source: str = Field(description="Dimension table name")
+    data_source: str = Field(description="Derived metric table name")
     field_ref: str = Field(description="table.column reference")
     joins: List[JoinClauseRequest] = Field(
         default_factory=list, description="FK JOIN clauses"
@@ -39,9 +39,15 @@ class CreateDimensionRequest(BaseModel):
     description: Optional[str] = Field(default=None, description="Optional notes")
 
 
-class UpdateDimensionRequest(CreateDimensionRequest):
-    """Request body for updating an existing dimension."""
+class UpdateDerivedMetricRequest(CreateDerivedMetricRequest):
+    """Request body for updating an existing derived metric."""
     pass
+
+
+class BatchDeleteDerivedMetricsRequest(BaseModel):
+    """Request body for batch-deleting derived metrics."""
+
+    ids: List[str] = Field(description="Derived metric IDs to delete")
 
 
 def _get_context(agent):
@@ -57,42 +63,41 @@ def _get_context(agent):
     )
 
 
-def _require_store(dimension_store):
-    if dimension_store is None:
+def _require_store(derived_metric_store):
+    if derived_metric_store is None:
         raise HTTPException(
             status_code=503,
-            detail="DimensionStore is not configured.",
+            detail="DerivedMetricStore is not configured.",
         )
 
 
 def register_dimension_routes(
     app: FastAPI,
     agent,
-    dimension_store: Optional[DimensionStore],
+    derived_metric_store: Optional[DerivedMetricStore],
     config: Optional[Dict[str, Any]] = None,
-    terminology_store=None,
 ) -> None:
-    """Register dimension management routes on the FastAPI app."""
+    """Register derived metric management routes on the FastAPI app."""
 
-    @app.get("/api/easyq2sql/v1/dimensions")
-    async def list_dimensions() -> List[Dict[str, Any]]:
-        """List all defined dimensions."""
-        _require_store(dimension_store)
+    @app.get("/api/easyq2sql/v1/derived-metrics")
+    async def list_derived_metrics() -> List[Dict[str, Any]]:
+        """List all defined derived metrics."""
+        _require_store(derived_metric_store)
         context = _get_context(agent)
-        dims = await dimension_store.list_dimensions(context)
-        return [d.model_dump(mode="json") for d in dims]
+        derived_metrics = await derived_metric_store.list_derived_metrics(context)
+        return [d.model_dump(mode="json") for d in derived_metrics]
 
-    @app.post("/api/easyq2sql/v1/dimensions")
-    async def create_dimension(body: CreateDimensionRequest) -> Dict[str, Any]:
-        """Create a new dimension definition."""
-        _require_store(dimension_store)
-        from ...capabilities.dimension_store.models import Dimension
-        from ...capabilities.metric_store.models import JoinClause
+    @app.post("/api/easyq2sql/v1/derived-metrics")
+    async def create_derived_metric(body: CreateDerivedMetricRequest) -> Dict[str, Any]:
+        """Create a new derived metric definition."""
+        _require_store(derived_metric_store)
+        from ...capabilities.atomic_metric.models import JoinClause
+        from ...capabilities.derived_metric.models import DerivedMetric
 
         context = _get_context(agent)
 
-        dimension = Dimension(
-            metric_id=body.metric_id,
+        derived_metric = DerivedMetric(
+            atomic_metric_id=body.atomic_metric_id,
             name=body.name,
             business_definition=body.business_definition,
             value_range=body.value_range,
@@ -111,51 +116,48 @@ def register_dimension_routes(
             description=body.description,
         )
 
-        result = await dimension_store.create_dimension(dimension, context)
-
-        # Auto-generate terminology mapping
-        if terminology_store:
-            try:
-                await terminology_store.sync_auto_terms(
-                    context, metrics=[], dimensions=[result]
-                )
-            except Exception:
-                pass
+        result = await derived_metric_store.create_derived_metric(derived_metric, context)
 
         return result.model_dump(mode="json")
 
-    @app.get("/api/easyq2sql/v1/dimensions/{dimension_id}")
-    async def get_dimension(dimension_id: str) -> Dict[str, Any]:
-        """Get a single dimension with full detail."""
-        _require_store(dimension_store)
+    @app.get("/api/easyq2sql/v1/derived-metrics/{derived_metric_id}")
+    async def get_derived_metric(derived_metric_id: str) -> Dict[str, Any]:
+        """Get a single derived metric with full detail."""
+        _require_store(derived_metric_store)
         context = _get_context(agent)
-        dim = await dimension_store.get_dimension(dimension_id, context)
-        if dim is None:
+        derived_metric = await derived_metric_store.get_derived_metric(
+            derived_metric_id, context
+        )
+        if derived_metric is None:
             raise HTTPException(
-                status_code=404, detail=f"Dimension '{dimension_id}' not found"
+                status_code=404,
+                detail=f"DerivedMetric '{derived_metric_id}' not found",
             )
-        return dim.model_dump(mode="json")
+        return derived_metric.model_dump(mode="json")
 
-    @app.put("/api/easyq2sql/v1/dimensions/{dimension_id}")
-    async def update_dimension(
-        dimension_id: str, body: UpdateDimensionRequest
+    @app.put("/api/easyq2sql/v1/derived-metrics/{derived_metric_id}")
+    async def update_derived_metric(
+        derived_metric_id: str, body: UpdateDerivedMetricRequest
     ) -> Dict[str, Any]:
-        """Update an existing dimension."""
-        _require_store(dimension_store)
-        from ...capabilities.dimension_store.models import Dimension
-        from ...capabilities.metric_store.models import JoinClause
+        """Update an existing derived metric."""
+        _require_store(derived_metric_store)
+        from ...capabilities.atomic_metric.models import JoinClause
+        from ...capabilities.derived_metric.models import DerivedMetric
 
         context = _get_context(agent)
 
-        existing = await dimension_store.get_dimension(dimension_id, context)
+        existing = await derived_metric_store.get_derived_metric(
+            derived_metric_id, context
+        )
         if existing is None:
             raise HTTPException(
-                status_code=404, detail=f"Dimension '{dimension_id}' not found"
+                status_code=404,
+                detail=f"DerivedMetric '{derived_metric_id}' not found",
             )
 
-        dimension = Dimension(
-            id=dimension_id,
-            metric_id=body.metric_id,
+        derived_metric = DerivedMetric(
+            id=derived_metric_id,
+            atomic_metric_id=body.atomic_metric_id,
             name=body.name,
             business_definition=body.business_definition,
             value_range=body.value_range,
@@ -175,47 +177,58 @@ def register_dimension_routes(
             created_at=existing.created_at,
         )
 
-        success = await dimension_store.update_dimension(dimension, context)
+        success = await derived_metric_store.update_derived_metric(derived_metric, context)
         if not success:
-            raise HTTPException(status_code=500, detail="Failed to update dimension")
+            raise HTTPException(status_code=500, detail="Failed to update derived metric")
 
-        if terminology_store:
-            try:
-                await terminology_store.sync_auto_terms(
-                    context, metrics=[], dimensions=[dimension]
-                )
-            except Exception:
-                pass
-
-        updated = await dimension_store.get_dimension(dimension_id, context)
+        updated = await derived_metric_store.get_derived_metric(
+            derived_metric_id, context
+        )
         return updated.model_dump(mode="json") if updated else {}
 
-    @app.delete("/api/easyq2sql/v1/dimensions/{dimension_id}")
-    async def delete_dimension(dimension_id: str) -> Dict[str, str]:
-        """Delete a dimension definition."""
-        _require_store(dimension_store)
+    @app.delete("/api/easyq2sql/v1/derived-metrics/{derived_metric_id}")
+    async def delete_derived_metric(derived_metric_id: str) -> Dict[str, str]:
+        """Delete a derived metric definition."""
+        _require_store(derived_metric_store)
         context = _get_context(agent)
-        success = await dimension_store.delete_dimension(dimension_id, context)
+        success = await derived_metric_store.delete_derived_metric(
+            derived_metric_id, context
+        )
         if not success:
             raise HTTPException(
-                status_code=404, detail=f"Dimension '{dimension_id}' not found"
+                status_code=404,
+                detail=f"DerivedMetric '{derived_metric_id}' not found",
             )
-        return {"status": "ok", "dimension_id": dimension_id}
+        return {"status": "ok", "derived_metric_id": derived_metric_id}
 
-    @app.get("/api/easyq2sql/v1/metrics/{metric_id}/dimensions")
-    async def get_dimensions_by_metric(metric_id: str) -> List[Dict[str, Any]]:
-        """Get all dimensions linked to a specific metric."""
-        _require_store(dimension_store)
+    @app.post("/api/easyq2sql/v1/derived-metrics/batch-delete")
+    async def batch_delete_derived_metrics(
+        body: BatchDeleteDerivedMetricsRequest,
+    ) -> Dict[str, Any]:
+        """Delete multiple derived metrics in a single operation."""
+        _require_store(derived_metric_store)
         context = _get_context(agent)
-        dims = await dimension_store.get_dimensions_by_metric(metric_id, context)
-        return [d.model_dump(mode="json") for d in dims]
+        deleted = await derived_metric_store.delete_derived_metrics(body.ids, context)
+        return {"status": "ok", "deleted": deleted}
+
+    @app.get("/api/easyq2sql/v1/atomic-metrics/{atomic_metric_id}/derived-metrics")
+    async def get_derived_metrics_by_atomic_metric(
+        atomic_metric_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Get all derived metrics linked to a specific atomic metric."""
+        _require_store(derived_metric_store)
+        context = _get_context(agent)
+        derived_metrics = await derived_metric_store.get_derived_metrics_by_atomic_metric(
+            atomic_metric_id, context
+        )
+        return [d.model_dump(mode="json") for d in derived_metrics]
 
     class AutoRangeRequest(BaseModel):
-        """Request body for auto-generating dimension value range."""
-        data_source: str = Field(description="Dimension table name")
+        """Request body for auto-generating derived metric value range."""
+        data_source: str = Field(description="Derived metric table name")
         field_ref: str = Field(description="table.column reference")
 
-    @app.post("/api/easyq2sql/v1/dimensions/auto-range")
+    @app.post("/api/easyq2sql/v1/derived-metrics/auto-range")
     async def auto_range(body: AutoRangeRequest) -> Dict[str, Any]:
         """Run SELECT DISTINCT to auto-generate value range.
 

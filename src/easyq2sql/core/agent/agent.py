@@ -654,11 +654,14 @@ class Agent:
                 # TODO: Yield thinking indicator
                 pass
 
-            # Get LLM response
-            if self.config.stream_responses:
-                response = await self._handle_streaming_response(request)
-            else:
-                response = await self._send_llm_request(request)
+            # Get LLM response (with error recovery)
+            try:
+                if self.config.stream_responses:
+                    response = await self._handle_streaming_response(request)
+                else:
+                    response = await self._send_llm_request(request)
+            except Exception as llm_error:
+                response = await self.handle_llm_error(request, llm_error)
 
             # Handle tool calls
             if response.is_tool_call():
@@ -1509,3 +1512,144 @@ You can:
                     )
 
         return response
+
+    async def handle_llm_error(
+        self, request: LlmRequest, error: Exception
+    ) -> LlmResponse:
+        """Drive LLM error recovery using the configured ``ErrorRecoveryStrategy``.
+
+        This is the LLM counterpart to the inline tool-error recovery loop. It is
+        a *thin orchestrator*: error **classification** (output truncation,
+        context-too-long, transient 429/529) and the matching **remediation**
+        (``max_tokens`` escalation, reactive compaction, exponential backoff,
+        fallback-model selection) all live in the strategy, imported from
+        ``easyq2sql.core.recovery``. This method just applies the returned
+        :class:`RecoveryAction`:
+
+        - ``RETRY``: honor ``retry_delay_ms`` (backoff), apply
+          ``switch_model`` if the strategy asked for a fallback model, then
+          resend the request.
+        - ``FALLBACK``: return a synthetic response built from
+          ``fallback_value``/``message``.
+        - ``SKIP``: return an empty response without failing the turn.
+        - ``FAIL``: re-raise the original error (bubbles up to
+          ``send_message``).
+
+        If no recovery strategy is configured, the error is re-raised unchanged.
+
+        Args:
+            request: The LLM request that failed (mutated in place by the
+                strategy for escalation/compaction).
+            error: The exception raised by the LLM call.
+
+        Returns:
+            A recovered ``LlmResponse`` on RETRY/FALLBACK/SKIP.
+
+        Raises:
+            The original ``error`` when recovery fails or retries are exhausted.
+        """
+        if self.error_recovery_strategy is None:
+            raise error
+
+        recovery_span = None
+        if self.observability_provider:
+            recovery_span = await self.observability_provider.create_span(
+                "agent.llm.recovery",
+                attributes={
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                },
+            )
+
+        current_error = error
+        recovery_attempts = 0
+        final_success = False
+
+        try:
+            for recovery_attempt in range(1, self.config.max_recovery_attempts + 1):
+                recovery_attempts = recovery_attempt
+                action: RecoveryAction = (
+                    await self.error_recovery_strategy.handle_llm_error(
+                        error=current_error,
+                        request=request,
+                        attempt=recovery_attempt,
+                    )
+                )
+
+                if self.observability_provider and recovery_span:
+                    recovery_span.set_attribute(
+                        f"attempt_{recovery_attempt}_action", action.action.value
+                    )
+
+                if action.action == RecoveryActionType.RETRY:
+                    if action.retry_delay_ms:
+                        await asyncio.sleep(action.retry_delay_ms / 1000.0)
+
+                    # Switch to a fallback model if the strategy requested it
+                    # (e.g. after repeated 529 errors).
+                    if action.switch_model:
+                        self._switch_llm_model(action.switch_model)
+
+                    try:
+                        if self.config.stream_responses:
+                            response = await self._handle_streaming_response(request)
+                        else:
+                            response = await self._send_llm_request(request)
+                        final_success = True
+                        return response
+                    except Exception as retry_error:
+                        current_error = retry_error
+                        continue
+
+                elif action.action == RecoveryActionType.FALLBACK:
+                    final_success = True
+                    return LlmResponse(
+                        content=(
+                            str(action.fallback_value)
+                            if action.fallback_value is not None
+                            else action.message or "Fallback response used"
+                        ),
+                        metadata={
+                            "recovery_action": "fallback",
+                            "original_error": str(current_error),
+                        },
+                    )
+
+                elif action.action == RecoveryActionType.SKIP:
+                    final_success = True
+                    return LlmResponse(
+                        content=action.message or "Response skipped due to error",
+                        metadata={
+                            "recovery_action": "skip",
+                            "original_error": str(current_error),
+                        },
+                    )
+
+                else:  # RecoveryActionType.FAIL
+                    break
+        finally:
+            if self.observability_provider and recovery_span:
+                recovery_span.set_attribute(
+                    "total_recovery_attempts", recovery_attempts
+                )
+                recovery_span.set_attribute("final_success", final_success)
+                await self.observability_provider.end_span(recovery_span)
+
+        raise current_error
+
+    def _switch_llm_model(self, model_name: str) -> None:
+        """Best-effort switch of the LLM service's active model.
+
+        Used when a recovery strategy recommends a fallback model (e.g. after
+        repeated 529 overloaded errors). Implemented as a simple attribute set
+        so it works with any ``LlmService`` that exposes a writable ``model``
+        attribute; failures are logged but never raised, since a recovery hook
+        must not introduce a new error path.
+        """
+        try:
+            self.llm_service.model = model_name  # type: ignore[attr-defined]
+            logger.info(f"Switched LLM model to '{model_name}' for recovery")
+        except Exception as switch_error:
+            logger.warning(
+                f"Could not switch LLM model to '{model_name}': {switch_error}"
+            )

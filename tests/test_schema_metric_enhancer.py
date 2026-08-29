@@ -6,7 +6,7 @@ fail-open behavior on errors, and empty/invalid input handling.
 """
 
 import pytest
-from easyq2sql.capabilities.metric_store import Metric
+from easyq2sql.capabilities.atomic_metric import AtomicMetric
 from easyq2sql.capabilities.schema_store import ColumnSchema, TableSchema
 from easyq2sql.core.user import User
 
@@ -62,43 +62,43 @@ class MockSchemaStore:
         return len(tables)
 
 
-class MockMetricStore:
-    """MetricStore that returns predefined results for testing."""
+class MockAtomicMetricStore:
+    """AtomicMetricStore that returns predefined results for testing."""
 
     def __init__(self, metrics=None, should_fail=False):
         self.metrics = metrics or []
         self.should_fail = should_fail
         self.search_calls = []
 
-    async def search_metrics(self, query, context, *, limit=10):
+    async def search_atomic_metrics(self, query, context, *, limit=10):
         self.search_calls.append(query)
         if self.should_fail:
             raise RuntimeError("Simulated metric search failure")
-        from easyq2sql.capabilities.metric_store import MetricSearchResult
+        from easyq2sql.capabilities.atomic_metric import AtomicMetricSearchResult
         return [
-            MetricSearchResult(metric=m, similarity_score=0.9 - i * 0.1)
+            AtomicMetricSearchResult(atomic_metric=m, similarity_score=0.9 - i * 0.1)
             for i, m in enumerate(self.metrics[:limit])
         ]
 
-    async def get_metric(self, metric_id, context):
+    async def get_atomic_metric(self, metric_id, context):
         for m in self.metrics:
             if m.id == metric_id:
                 return m
         return None
 
-    async def create_metric(self, metric, context):
-        return metric
+    async def create_atomic_metric(self, atomic_metric, context):
+        return atomic_metric
 
-    async def update_metric(self, metric, context):
+    async def update_atomic_metric(self, atomic_metric, context):
         return True
 
-    async def delete_metric(self, metric_id, context):
+    async def delete_atomic_metric(self, metric_id, context):
         return True
 
-    async def list_metrics(self, context):
+    async def list_atomic_metrics(self, context):
         return self.metrics
 
-    async def get_metrics_by_table(self, table_name, context):
+    async def get_atomic_metrics_by_table(self, table_name, context):
         return [m for m in self.metrics if m.data_source == table_name]
 
 
@@ -152,7 +152,7 @@ def sample_tables():
 @pytest.fixture
 def sample_metrics():
     return [
-        Metric(
+        AtomicMetric(
             id="metric_sales",
             name="Total Sales",
             description="Sum of all order amounts",
@@ -161,7 +161,7 @@ def sample_metrics():
             data_source="orders",
             analysis_field="orders.amount",
         ),
-        Metric(
+        AtomicMetric(
             id="metric_customers",
             name="Customer Count",
             description="Number of unique customers",
@@ -179,10 +179,10 @@ def enhancer(sample_tables, sample_metrics):
     from easyq2sql.core.enhancer.schema_metric_enhancer import SchemaMetricContextEnhancer
 
     schema_store = MockSchemaStore(tables=sample_tables)
-    metric_store = MockMetricStore(metrics=sample_metrics)
+    metric_store = MockAtomicMetricStore(metrics=sample_metrics)
     return SchemaMetricContextEnhancer(
         schema_store=schema_store,
-        metric_store=metric_store,
+        atomic_metric_store=metric_store,
         max_schema_tables=3,
         max_metrics=3,
     )
@@ -286,10 +286,10 @@ class TestSchemaMetricContextEnhancer:
         from easyq2sql.core.enhancer.schema_metric_enhancer import SchemaMetricContextEnhancer
 
         schema_store = MockSchemaStore(should_fail=True)
-        metric_store = MockMetricStore(metrics=[])
+        metric_store = MockAtomicMetricStore(metrics=[])
         enhancer = SchemaMetricContextEnhancer(
             schema_store=schema_store,
-            metric_store=metric_store,
+            atomic_metric_store=metric_store,
         )
 
         base_prompt = "You are a SQL assistant."
@@ -306,10 +306,10 @@ class TestSchemaMetricContextEnhancer:
         from easyq2sql.core.enhancer.schema_metric_enhancer import SchemaMetricContextEnhancer
 
         schema_store = MockSchemaStore(tables=sample_tables)
-        metric_store = MockMetricStore(should_fail=True)
+        metric_store = MockAtomicMetricStore(should_fail=True)
         enhancer = SchemaMetricContextEnhancer(
             schema_store=schema_store,
-            metric_store=metric_store,
+            atomic_metric_store=metric_store,
         )
 
         base_prompt = "You are a SQL assistant."
@@ -328,10 +328,10 @@ class TestSchemaMetricContextEnhancer:
         from easyq2sql.core.enhancer.schema_metric_enhancer import SchemaMetricContextEnhancer
 
         schema_store = MockSchemaStore(tables=[])
-        metric_store = MockMetricStore(metrics=[])
+        metric_store = MockAtomicMetricStore(metrics=[])
         enhancer = SchemaMetricContextEnhancer(
             schema_store=schema_store,
-            metric_store=metric_store,
+            atomic_metric_store=metric_store,
         )
 
         base_prompt = "You are a SQL assistant."
@@ -363,8 +363,8 @@ class TestSchemaMetricContextEnhancer:
         # Verify both stores received the user message as search query
         assert len(enhancer.schema_store.search_calls) > 0
         assert enhancer.schema_store.search_calls[0] == user_message
-        assert len(enhancer.metric_store.search_calls) > 0
-        assert enhancer.metric_store.search_calls[0] == user_message
+        assert len(enhancer.atomic_metric_store.search_calls) > 0
+        assert enhancer.atomic_metric_store.search_calls[0] == user_message
 
     @pytest.mark.asyncio
     async def test_combined_schema_and_metric_injection(self, enhancer, test_user):
@@ -398,9 +398,9 @@ class TestEnhancerEdgeCases:
         from easyq2sql.core.enhancer.schema_metric_enhancer import SchemaMetricContextEnhancer
 
         schema_store = MockSchemaStore(tables=sample_tables)
-        metric_store = MockMetricStore(metrics=[])
+        metric_store = MockAtomicMetricStore(metrics=[])
         enhancer = SchemaMetricContextEnhancer(
-            schema_store=schema_store, metric_store=metric_store
+            schema_store=schema_store, atomic_metric_store=metric_store
         )
 
         # Messages with SQL-like syntax, quotes, etc.
@@ -422,9 +422,9 @@ class TestEnhancerEdgeCases:
         from easyq2sql.core.enhancer.schema_metric_enhancer import SchemaMetricContextEnhancer
 
         schema_store = MockSchemaStore(tables=sample_tables)
-        metric_store = MockMetricStore(metrics=[])
+        metric_store = MockAtomicMetricStore(metrics=[])
         enhancer = SchemaMetricContextEnhancer(
-            schema_store=schema_store, metric_store=metric_store
+            schema_store=schema_store, atomic_metric_store=metric_store
         )
 
         long_message = "sales " * 500  # very long message
@@ -441,9 +441,9 @@ class TestEnhancerEdgeCases:
         schema_store = MockSchemaStore(tables=[
             TableSchema(table_name="empty_table", description="A table with no columns")
         ])
-        metric_store = MockMetricStore(metrics=[])
+        metric_store = MockAtomicMetricStore(metrics=[])
         enhancer = SchemaMetricContextEnhancer(
-            schema_store=schema_store, metric_store=metric_store
+            schema_store=schema_store, atomic_metric_store=metric_store
         )
 
         enhanced = await enhancer.enhance_system_prompt(
@@ -462,9 +462,9 @@ class TestEnhancerEdgeCases:
                 columns=[ColumnSchema(name="id", data_type="INTEGER")],
             )
         ])
-        metric_store = MockMetricStore(metrics=[])
+        metric_store = MockAtomicMetricStore(metrics=[])
         enhancer = SchemaMetricContextEnhancer(
-            schema_store=schema_store, metric_store=metric_store
+            schema_store=schema_store, atomic_metric_store=metric_store
         )
 
         enhanced = await enhancer.enhance_system_prompt(

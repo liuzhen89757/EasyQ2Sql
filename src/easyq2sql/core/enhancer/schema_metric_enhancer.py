@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from easyq2sql.core.enhancer.base import LlmContextEnhancer
 
 if TYPE_CHECKING:
-    from easyq2sql.capabilities.metric_store import MetricStore
+    from easyq2sql.capabilities.atomic_metric import AtomicMetricStore
     from easyq2sql.capabilities.schema_store import SchemaStore
     from easyq2sql.core.user.models import User
 
@@ -27,7 +27,7 @@ class SchemaMetricContextEnhancer(LlmContextEnhancer):
 
     On each conversation turn, this enhancer:
     1. Searches the SchemaStore for tables relevant to the user's question
-    2. Searches the MetricStore for metrics relevant to the user's question
+    2. Searches the AtomicMetricStore for atomic metrics relevant to the user's question
     3. Formats the results and appends them to the system prompt
 
     This gives the LLM direct visibility into the data model without
@@ -38,24 +38,24 @@ class SchemaMetricContextEnhancer(LlmContextEnhancer):
 
     Args:
         schema_store: SchemaStore implementation for table metadata search.
-        metric_store: MetricStore implementation for metric search.
+        atomic_metric_store: AtomicMetricStore implementation for metric search.
         max_schema_tables: Maximum number of matching tables to inject (default 5).
         max_metrics: Maximum number of matching metrics to inject (default 5).
 
     Example:
-        >>> enhancer = SchemaMetricContextEnhancer(schema_store, metric_store)
+        >>> enhancer = SchemaMetricContextEnhancer(schema_store, atomic_metric_store)
         >>> agent = Agent(..., llm_context_enhancer=enhancer)
     """
 
     def __init__(
         self,
         schema_store: "SchemaStore",
-        metric_store: "MetricStore",
+        atomic_metric_store: "AtomicMetricStore",
         max_schema_tables: int = 5,
         max_metrics: int = 5,
     ):
         self.schema_store = schema_store
-        self.metric_store = metric_store
+        self.atomic_metric_store = atomic_metric_store
         self.max_schema_tables = max_schema_tables
         self.max_metrics = max_metrics
 
@@ -132,7 +132,7 @@ class SchemaMetricContextEnhancer(LlmContextEnhancer):
 
             # 2. Search and inject relevant metrics
             try:
-                metric_results = await self.metric_store.search_metrics(
+                metric_results = await self.atomic_metric_store.search_atomic_metrics(
                     query=user_message,
                     context=context,
                     limit=self.max_metrics,
@@ -145,7 +145,7 @@ class SchemaMetricContextEnhancer(LlmContextEnhancer):
                         "",
                     ]
                     for r in metric_results:
-                        m = r.metric
+                        m = r.atomic_metric
                         lines.append(f"### Metric: {m.name} (id: {m.id})")
                         if m.business_definition:
                             lines.append(f"Business Definition: {m.business_definition}")

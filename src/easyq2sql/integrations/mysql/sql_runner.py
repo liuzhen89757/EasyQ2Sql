@@ -35,7 +35,7 @@ class MySQLRunner(SqlRunner):
             self.pymysql = pymysql
         except ImportError as e:
             raise ImportError(
-                "PyMySQL package is required. Install with: pip install 'vanna[mysql]'"
+                "PyMySQL package is required. Install with: pip install 'easyq2sql[mysql]'"
             ) from e
 
         self.host = host

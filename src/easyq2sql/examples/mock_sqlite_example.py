@@ -24,11 +24,11 @@ from easyq2sql import (
     Agent,
     Tool,
     ToolContext,
-    ToolRegistry,
     ToolResult,
     User,
     UiComponent,
 )
+from easyq2sql.enhanced_tool_registry import EnhancedToolRegistry
 from easyq2sql.core.interfaces import LlmService
 from easyq2sql.core.models import (
     LlmRequest,
@@ -140,10 +140,10 @@ def create_demo_agent() -> Agent:
             f"Chinook database not found at {database_path}. Please download it from https://vanna.ai/Chinook.sqlite"
         )
 
-    tool_registry = ToolRegistry()
+    tool_registry = EnhancedToolRegistry()
     sqlite_runner = SqliteRunner(database_path=database_path)
     sql_tool = RunSqlTool(sql_runner=sqlite_runner)
-    tool_registry.register(sql_tool)
+    tool_registry.register_local_tool(sql_tool, access_groups=[])
 
     llm_service = MockSqliteLlmService()
 

@@ -1,0 +1,103 @@
+# SQL security configuration for the `run_sql` tool.
+#
+# Consumed by `easyq2sql.enhanced_tool_registry.EnhancedToolRegistry`. Every
+# section mirrors a Pydantic model; unknown keys are ignored and every field
+# falls back to a built-in default when omitted.
+#
+# The checks run in this order before a query is executed:
+#   1. injection (regex)  -> 2. parse/syntax  -> 3. governance  ->
+#   4. complexity/limits  -> 5. forbidden tables/functions  ->
+#   6. semantics  -> 7. row-level security rewrite.
+
+sql_injection:
+  enabled: true
+
+  # Queries matching any entry here are treated as metadata/introspection and
+  # therefore skip the `metadata_related: true` forbidden patterns below.
+  # This lets schema-discovery tools run without tripping safety patterns.
+  allowed_metadata_patterns:
+    - pattern: "^\\s*(SHOW|DESCRIBE|DESC|EXPLAIN)\\b"
+      description: "Schema introspection commands"
+      metadata_related: true
+
+  # Raw-string regex patterns that reject a query before it is parsed.
+  forbidden_patterns:
+    - pattern: "INTO\\s+(OUTFILE|DUMPFILE)"
+      description: "File write via SELECT ... INTO OUTFILE/DUMPFILE"
+    - pattern: "LOAD_FILE\\s*\\("
+      description: "Read local file via LOAD_FILE()"
+    - pattern: "COPY\\s+.+\\s+FROM\\s+PROGRAM"
+      description: "Command execution via COPY ... FROM PROGRAM"
+    - pattern: "EXEC(UTE)?\\s*\\(\\s*(master|x?p_cmdshell|sp_)"
+      description: "Stored-procedure command execution"
+    - pattern: "xp_cmdshell"
+      description: "xp_cmdshell command execution"
+
+query_governance:
+  enabled: true
+  # When true, only SELECT (including WITH ... SELECT) may run; every
+  # write statement (INSERT/UPDATE/DELETE/MERGE/DDL) is rejected.
+  read_only: true
+
+query_limits:
+  enabled: true
+  max_query_length: 10000   # characters
+  max_subqueries: 5         # subquery nodes anywhere in the AST
+  max_cte_depth: 3          # CTE (WITH) entries
+  max_joins: 15             # JOIN nodes anywhere in the AST
+  max_result_rows: 10000    # upper bound on an explicit LIMIT clause
+
+  # Blocked whole tables (case-insensitive; "schema.name" or "name").
+  forbidden_tables: []
+  #    - payroll.salaries
+  #    - users.credentials
+
+  # Blocked SQL functions (case-insensitive; matched by name).
+  blocked_functions:
+    - sleep
+    - benchmark
+    - pg_sleep
+    - pg_read_file
+    - pg_ls_dir
+    - pg_read_binary_file
+    - load_file
+    - xp_cmdshell
+    - sp_executesql
+
+sql_semantics:
+  enabled: true
+  check_join: true          # every JOIN must have ON/USING
+  check_aggregation: true   # non-aggregated columns must be in GROUP BY
+  check_window: true        # window functions need PARTITION BY (see below)
+  check_rollup: true        # reserved (fail-open)
+  check_partition_constant: true   # reserved (fail-open)
+  check_outer_join_null_filter: true  # reserved (fail-open)
+  require_partition_by_for_window_cues: true
+
+row_level_security:
+  enabled: true
+
+  # Maps a user group to the set of values its members may see. A value of
+  # "*" grants unrestricted access (no filter is injected for that group).
+  group_value_mapping: {}
+  #    china: [CN]
+  #    emea: [DE, FR, GB]
+  #    admin: ["*"]
+
+  # Tables protected by RLS. Each entry needs either a direct filter column
+  # (`column`) or an indirect mapping (`via`).
+  protected_tables: []
+  #    - table: sales.orders
+  #      column: region
+  #      description: "Orders are filtered by the sales region column"
+  #
+  #    - table: sales.order_items
+  #      via:
+  #        join_table: sales.orders
+  #        join_column: order_id
+  #        via_column: region
+  #      description: "Order items inherit the region filter via orders"
+
+audit:
+  log_sql_transformations: true   # log when RLS rewrites a query
+  log_rejected_queries: true      # log when a check rejects a query
